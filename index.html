@@ -2,7 +2,7 @@
 <html lang="pt-PT">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Custo Confecção App - LPM</title>
     
     <!-- React & ReactDOM -->
@@ -22,9 +22,71 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
     <style>
-        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
-        .app-container { max-width: 480px; margin: 0 auto; min-height: 100vh; background: white; position: relative; box-shadow: 0 0 20px rgba(0,0,0,0.05); }
-        ::-webkit-scrollbar { width: 0px; background: transparent; }
+        /* Estilos Globais e Reset */
+        body { 
+            font-family: 'Inter', sans-serif; 
+            background-color: #f3f4f6;
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+        }
+
+        /* Container Principal Responsivo */
+        .app-container { 
+            width: 100%;
+            min-height: 100vh; 
+            background: #f9fafb; /* Fundo ligeiramente cinza para contraste no PC */
+            position: relative; 
+            overflow-x: hidden;
+        }
+
+        /* Área de Conteúdo Centralizada para PC */
+        .content-wrapper {
+            max-width: 1400px; /* Limite de largura para não ficar muito esticado em telas ultrawide */
+            margin: 0 auto;
+            padding-bottom: 100px; /* Espaço para o menu inferior */
+        }
+        
+        /* Ajuste de Cards para parecerem "Apps" */
+        .app-card {
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .app-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+
+        /* Menu Inferior Fixo */
+        .bottom-nav {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: white;
+            border-top: 1px solid #e5e7eb;
+            padding: 0.75rem;
+            display: flex;
+            justify-content: center; /* Centraliza no PC */
+            gap: 2rem; /* Espaçamento entre ícones no PC */
+            z-index: 50;
+            box-shadow: 0 -4px 6px -1px rgba(0, 0, 0, 0.05);
+        }
+
+        @media (max-width: 640px) {
+            .bottom-nav {
+                justify-content: space-around; /* Distribui no Mobile */
+                gap: 0;
+            }
+        }
+
+        /* Esconder scrollbar mas permitir scroll */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        
+        /* Animações Suaves */
+        .animate-fade-in { animation: fadeIn 0.3s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
 <body>
@@ -33,7 +95,7 @@
     <!-- MÓDULO FIREBASE -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
         // CONFIGURAÇÃO DO FIREBASE (LPM CUSTOS)
@@ -51,14 +113,12 @@
             app = initializeApp(firebaseConfig);
             db = getFirestore(app);
             auth = getAuth(app);
-            // Login anónimo para permitir leitura/escrita segura por utilizador
             signInAnonymously(auth).catch((error) => console.error("Erro auth:", error));
         } catch (e) {
             console.error("Erro Firebase:", e);
         }
 
-        // Expor serviços para o React
-        window.AppServices = { db, auth, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, onAuthStateChanged };
+        window.AppServices = { db, auth, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, onAuthStateChanged, getDocs, writeBatch };
     </script>
 
     <!-- CÓDIGO DA APLICAÇÃO (REACT) -->
@@ -85,7 +145,7 @@
                             const q = query(collection(db, `users/${user.uid}/${collectionName}`));
                             const unsubscribe = onSnapshot(q, (snapshot) => {
                                 const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                                // Se houver dados, usa. Se não, e for a primeira vez, mantém vazio
+                                // Se houver dados, usa.
                                 if (items.length > 0) setData(items);
                                 else if (defaultValue && defaultValue.length > 0 && items.length === 0) {
                                     setData(defaultValue);
@@ -108,9 +168,9 @@
                 const { auth, db, collection, addDoc } = window.AppServices;
                 if (!auth.currentUser) return;
                 const { id, ...cleanItem } = item;
-                // Adiciona timestamp para ordenação correta
-                const payload = { ...cleanItem, timestamp: Date.now() };
-                await addDoc(collection(db, `users/${auth.currentUser.uid}/${collectionName}`), payload);
+                // Adiciona timestamp para ordenação
+                if (!cleanItem.timestamp) cleanItem.timestamp = Date.now();
+                await addDoc(collection(db, `users/${auth.currentUser.uid}/${collectionName}`), cleanItem);
             };
 
             const update = async (item) => {
@@ -118,8 +178,7 @@
                 if (!auth.currentUser || !item.id) return;
                 if (typeof item.id === 'number') { add(item); return; }
                 const { id, ...cleanItem } = item;
-                // Atualiza timestamp para subir na lista se editado (opcional, aqui mantemos a criação ou atualizamos)
-                // Vamos manter o timestamp original se existir, senão cria.
+                // Mantém timestamp original se existir, senão cria
                 if (!cleanItem.timestamp) cleanItem.timestamp = Date.now();
                 await updateDoc(doc(db, `users/${auth.currentUser.uid}/${collectionName}`, id), cleanItem);
             };
@@ -134,7 +193,7 @@
             return [data, add, update, remove, loading];
         };
 
-        // --- Helper: LocalStorage Hook ---
+        // --- Helper: LocalStorage Hook (Mantido para navegação local simples) ---
         const useStickyState = (defaultValue, key) => {
             const [value, setValue] = useState(() => {
                 const stickyValue = window.localStorage.getItem(key);
@@ -151,7 +210,6 @@
             return str.toLowerCase().replace(/(?:^|\s|["'([{])+\S/g, match => match.toUpperCase());
         };
 
-        // --- Componentes de Ícones (Lucide) ---
         const Icon = ({ name, size = 24, color = "currentColor", className="" }) => {
             if (!window.lucide) return null;
             return <i data-lucide={name} className={className} style={{ width: size, height: size, color: color, display: 'inline-block' }}></i>;
@@ -213,7 +271,7 @@
         };
 
         const MenuCard = ({ title, subtitle, icon, color, onClick }) => (
-            <div onClick={onClick} className="bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between mb-4 cursor-pointer hover:shadow-md transition-all active:scale-95">
+            <div onClick={onClick} className="app-card bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between cursor-pointer h-full">
                 <div className="flex items-center gap-4">
                     <div className={`p-3 rounded-xl ${color} text-white flex items-center justify-center`}><IconWrapper name={icon} size={24} /></div>
                     <div><h3 className="font-bold text-gray-800 text-lg">{title}</h3><p className="text-gray-500 text-sm">{subtitle}</p></div>
@@ -258,28 +316,34 @@
 
         // --- SCREENS ---
         const HomeScreen = ({ setScreen, products }) => {
-            // Ordenação por Timestamp (Data/Hora real)
+            // Ordenação por Timestamp
             const sortedProducts = [...products].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
             const lastProduct = sortedProducts.length > 0 ? sortedProducts[0] : null;
 
             return (
-                <div className="p-6 pb-24 animate-fade-in">
+                <div className="p-6 animate-fade-in content-wrapper">
                     <header className="flex justify-between items-center mb-6">
                         <div><h1 className="text-2xl font-bold text-slate-800">Confecção Cost</h1><p className="text-gray-500 text-sm">Controle sua produção</p></div>
                         <div className="flex gap-2">
-                             <button onClick={() => setScreen('settings')} className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-600 shadow-sm hover:bg-slate-200"><IconWrapper name="settings" size={20} /></button>
-                             <div className="w-10 h-10 bg-slate-200 rounded-full flex items-center justify-center text-slate-600 font-bold border-2 border-white shadow-sm">C</div>
+                             <button onClick={() => setScreen('settings')} className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-slate-600 shadow-sm hover:bg-gray-50 border border-gray-200"><IconWrapper name="settings" size={20} /></button>
+                             <div className="w-10 h-10 bg-slate-800 rounded-full flex items-center justify-center text-white font-bold shadow-sm">C</div>
                         </div>
                     </header>
                     <SummaryCard lastProduct={lastProduct} />
+                    
                     <h2 className="text-slate-800 font-bold mb-4 text-lg">Menu Principal</h2>
-                    <MenuCard title="Novo Cálculo" subtitle="Criar ficha técnica de custo" icon="calculator" color="bg-blue-600" onClick={() => setScreen('calculator')} />
-                    <MenuCard title="Meus Clientes" subtitle="Custos por cliente" icon="users" color="bg-orange-500" onClick={() => setScreen('clients')} />
-                    <MenuCard title="Meus Tecidos" subtitle="Gerenciar matéria-prima" icon="scissors" color="bg-pink-500" onClick={() => setScreen('fabrics')} />
-                    <MenuCard title="Meus Produtos" subtitle="Ver histórico e preços" icon="shirt" color="bg-emerald-500" onClick={() => setScreen('search')} />
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                        <MenuCard title="Novo Cálculo" subtitle="Criar ficha técnica" icon="calculator" color="bg-blue-600" onClick={() => setScreen('calculator')} />
+                        <MenuCard title="Meus Clientes" subtitle="Custos por cliente" icon="users" color="bg-orange-500" onClick={() => setScreen('clients')} />
+                        <MenuCard title="Meus Tecidos" subtitle="Matéria-prima" icon="scissors" color="bg-pink-500" onClick={() => setScreen('fabrics')} />
+                        <MenuCard title="Meus Produtos" subtitle="Histórico e preços" icon="shirt" color="bg-emerald-500" onClick={() => setScreen('search')} />
+                    </div>
+
                     <h2 className="text-slate-800 font-bold mb-4 mt-6 text-lg">Financeiro</h2>
-                    <MenuCard title="Custos Fixos" subtitle="Aluguel, Luz, Prolabore..." icon="dollar-sign" color="bg-indigo-500" onClick={() => setScreen('fixedCosts')} />
-                    <MenuCard title="Custos Variáveis" subtitle="Impostos, Comissões (%)" icon="percent" color="bg-violet-500" onClick={() => setScreen('variableCosts')} />
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <MenuCard title="Custos Fixos" subtitle="Aluguel, Luz, Prolabore..." icon="dollar-sign" color="bg-indigo-500" onClick={() => setScreen('fixedCosts')} />
+                        <MenuCard title="Custos Variáveis" subtitle="Impostos, Comissões (%)" icon="percent" color="bg-violet-500" onClick={() => setScreen('variableCosts')} />
+                    </div>
                 </div>
             );
         };
@@ -297,42 +361,54 @@
             const handleRemoveExtra = (idx) => setFormData(prev => ({ ...prev, extraFields: prev.extraFields.filter((_, i) => i !== idx) }));
 
             return (
-                <div className="p-6 pb-24 min-h-screen bg-gray-50">
+                <div className="p-6 pb-24 min-h-screen bg-gray-50 content-wrapper">
                     <div className="flex items-center gap-3 mb-6"><button onClick={onBack} className="p-2 bg-white rounded-lg shadow-sm border border-gray-100 text-gray-600"><IconWrapper name="arrow-left" size={20}/></button><h1 className="text-xl font-bold">Editar Cliente</h1></div>
-                    <div className="bg-white p-6 rounded-2xl shadow-sm border mb-6 space-y-4">
-                        <input name="name" value={formData.name || ''} onChange={handleChange} placeholder="Nome" className="w-full p-3 border rounded-lg"/>
-                        <input name="representative" value={formData.representative||''} onChange={handleChange} placeholder="Representante" className="w-full p-3 border rounded-lg"/>
-                        <input name="paymentTerms" value={formData.paymentTerms||''} onChange={handleChange} placeholder="Prazo Pagto" className="w-full p-3 border rounded-lg"/>
-                    </div>
-                    <h3 className="font-bold mb-2">Taxas (%)</h3>
-                    <div className="bg-white p-6 rounded-2xl shadow-sm border mb-6 grid grid-cols-2 gap-4 text-xs">
-                        <div>Comissão <input type="number" step="0.1" name="commission" value={formData.commission || ''} onChange={handleChange} className="w-full p-2 border rounded"/></div>
-                        <div>Impostos <input type="number" step="0.1" name="tax" value={formData.tax || ''} onChange={handleChange} className="w-full p-2 border rounded"/></div>
-                        <div>MD <input type="number" step="0.1" name="expenses" value={formData.expenses || ''} onChange={handleChange} className="w-full p-2 border rounded"/></div>
-                        <div>Financeiro <input type="number" step="0.1" name="financial" value={formData.financial || ''} onChange={handleChange} className="w-full p-2 border rounded"/></div>
-                        <div>Negociação <input type="number" step="0.1" name="negotiation" value={formData.negotiation || ''} onChange={handleChange} className="w-full p-2 border rounded"/></div>
-                        <div>Lucro <input type="number" step="0.1" name="margin" value={formData.margin || ''} onChange={handleChange} className="w-full p-2 border rounded"/></div>
-                        <div>Frete <input type="number" step="0.1" name="freight" value={formData.freight || ''} onChange={handleChange} className="w-full p-2 border rounded"/></div>
-                    </div>
-                    <div className="flex justify-between mb-2"><h3 className="font-bold">Insumos Cliente</h3><button onClick={handleAddInput} className="text-blue-600 font-bold text-sm">+ Add</button></div>
-                    <div className="bg-white p-6 rounded-2xl shadow-sm border mb-6 space-y-2">
-                        {formData.inputs.length === 0 && <p className="text-center text-gray-400 text-xs py-2">Sem insumos específicos</p>}
-                        {formData.inputs.map((inp, i) => (
-                            <div key={inp.id} className="flex gap-2 items-center">
-                                <input className="flex-1 p-2 border rounded text-sm" placeholder="Nome" value={inp.name || ''} onChange={e=>handleUpdateInput(i,'name',e.target.value)} />
-                                <div className="w-24"><CurrencyInput value={inp.cost} onChange={(val)=>handleUpdateInput(i,'cost',val)} className="w-full p-2 border rounded text-sm"/></div>
-                                <button onClick={()=>handleAddInput()} className="text-green-500 p-2"><IconWrapper name="plus" size={18}/></button>
-                                <button onClick={()=>handleRemoveInput(i)} className="text-red-400"><IconWrapper name="trash-2" size={18}/></button>
+                    
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div className="space-y-6">
+                            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 space-y-4">
+                                <div><label className="block text-sm font-medium text-gray-600 mb-1">Nome</label><input name="name" value={formData.name || ''} onChange={handleChange} className="w-full p-3 border rounded-lg outline-none"/></div>
+                                <div><label className="block text-sm font-medium text-gray-600 mb-1">Representante</label><input name="representative" value={formData.representative||''} onChange={handleChange} className="w-full p-3 border rounded-lg outline-none"/></div>
+                                <div><label className="block text-sm font-medium text-gray-600 mb-1">Prazo Pagto</label><input name="paymentTerms" value={formData.paymentTerms||''} onChange={handleChange} className="w-full p-3 border rounded-lg outline-none"/></div>
                             </div>
-                        ))}
+                            
+                            <h3 className="font-bold mb-2">Taxas (%)</h3>
+                            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 mb-6 grid grid-cols-2 gap-4 text-xs">
+                                <div>Comissão <input type="number" step="0.1" name="commission" value={formData.commission || ''} onChange={handleChange} className="w-full p-2 border rounded"/></div>
+                                <div>Impostos <input type="number" step="0.1" name="tax" value={formData.tax || ''} onChange={handleChange} className="w-full p-2 border rounded"/></div>
+                                <div>MD <input type="number" step="0.1" name="expenses" value={formData.expenses || ''} onChange={handleChange} className="w-full p-2 border rounded"/></div>
+                                <div>Financeiro <input type="number" step="0.1" name="financial" value={formData.financial || ''} onChange={handleChange} className="w-full p-2 border rounded"/></div>
+                                <div>Negociação <input type="number" step="0.1" name="negotiation" value={formData.negotiation || ''} onChange={handleChange} className="w-full p-2 border rounded"/></div>
+                                <div>Lucro <input type="number" step="0.1" name="margin" value={formData.margin || ''} onChange={handleChange} className="w-full p-2 border rounded"/></div>
+                                <div>Frete <input type="number" step="0.1" name="freight" value={formData.freight || ''} onChange={handleChange} className="w-full p-2 border rounded"/></div>
+                            </div>
+                        </div>
+
+                        <div className="space-y-6">
+                            <div className="flex justify-between items-center"><h3 className="font-bold">Insumos Cliente</h3></div>
+                            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 space-y-2">
+                                {formData.inputs.length === 0 && <p className="text-center text-gray-400 text-xs py-2">Sem insumos específicos</p>}
+                                {formData.inputs.map((inp, i) => (
+                                    <div key={inp.id} className="flex gap-2 items-center">
+                                        <input className="flex-1 p-2 border rounded text-sm" placeholder="Nome" value={inp.name || ''} onChange={e=>handleUpdateInput(i,'name',e.target.value)} />
+                                        <div className="w-24"><CurrencyInput value={inp.cost} onChange={(val)=>handleUpdateInput(i,'cost',val)} className="w-full p-2 border rounded text-sm"/></div>
+                                        <button onClick={()=>handleRemoveInput(i)} className="text-red-400 p-2"><IconWrapper name="trash-2" size={18}/></button>
+                                    </div>
+                                ))}
+                                <button onClick={handleAddInput} className="w-full py-2 bg-blue-50 text-blue-600 font-bold rounded-lg mt-2 flex items-center justify-center gap-2"><IconWrapper name="plus" size={16} /> Adicionar Insumo</button>
+                            </div>
+                            
+                            <div className="flex justify-between items-center"><h3 className="font-bold">Extras</h3></div>
+                            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 space-y-2">
+                                {formData.extraFields.map((ex, i) => (
+                                    <div key={ex.id} className="flex gap-2"><input className="flex-1 p-2 border rounded text-sm" placeholder="Campo" value={ex.label || ''} onChange={e=>handleUpdateExtra(i,'label',e.target.value)} /><input className="flex-1 p-2 border rounded text-sm" placeholder="Valor" value={ex.value || ''} onChange={e=>handleUpdateExtra(i,'value',e.target.value)} /><button onClick={()=>handleRemoveExtra(i)} className="text-red-400 p-2"><IconWrapper name="trash-2" size={16}/></button></div>
+                                ))}
+                                <button onClick={handleAddExtra} className="w-full py-2 bg-blue-50 text-blue-600 font-bold rounded-lg mt-2 flex items-center justify-center gap-2"><IconWrapper name="plus" size={16} /> Adicionar Campo</button>
+                            </div>
+                        </div>
                     </div>
-                    <div className="flex justify-between mb-2"><h3 className="font-bold">Extras</h3><button onClick={handleAddExtra} className="text-blue-600 font-bold text-sm">+ Add</button></div>
-                    <div className="bg-white p-6 rounded-2xl shadow-sm border mb-6 space-y-2">
-                        {formData.extraFields.map((ex, i) => (
-                            <div key={ex.id} className="flex gap-2"><input className="flex-1 p-2 border rounded text-sm" placeholder="Campo" value={ex.label || ''} onChange={e=>handleUpdateExtra(i,'label',e.target.value)} /><input className="flex-1 p-2 border rounded text-sm" placeholder="Valor" value={ex.value || ''} onChange={e=>handleUpdateExtra(i,'value',e.target.value)} /><button onClick={()=>handleRemoveExtra(i)} className="text-red-400"><IconWrapper name="trash-2" size={16}/></button></div>
-                        ))}
-                    </div>
-                    <button onClick={() => onSave(formData)} className="w-full py-4 bg-blue-600 text-white rounded-xl font-bold">Salvar</button>
+
+                    <button onClick={() => onSave(formData)} className="w-full py-4 bg-blue-600 text-white rounded-xl font-bold shadow-lg mt-6">Salvar Alterações</button>
                 </div>
             );
         };
@@ -349,15 +425,17 @@
             if (selectedClient) return <ClientDetail client={selectedClient} onBack={() => setSelectedClient(null)} onSave={(data) => { onUpdateClient(data); setSelectedClient(null); }} />;
 
             return (
-                <div className="p-6 pb-24 min-h-screen relative">
+                <div className="p-6 pb-24 min-h-screen relative content-wrapper">
                     <div className="flex items-center gap-3 mb-6"><button onClick={() => setScreen('home')} className="p-2 bg-white rounded-lg shadow-sm border text-gray-600"><IconWrapper name="arrow-left" size={20}/></button><h1 className="text-xl font-bold">Clientes</h1></div>
-                    <div className="space-y-3">{clients.map(c => (
-                        <div key={c.id} onClick={() => setSelectedClient(c)} className="bg-white p-4 rounded-xl shadow-sm border flex justify-between items-center cursor-pointer">
-                            <div className="flex items-center gap-3"><div className="bg-orange-100 p-3 rounded-full text-orange-600"><IconWrapper name="users" size={20}/></div><h3 className="font-bold">{c.name}</h3></div>
-                            <button onClick={(e) => {e.stopPropagation(); onDeleteClient(c.id)}} className="text-gray-300 hover:text-red-500"><IconWrapper name="trash-2" size={20}/></button>
-                        </div>
-                    ))}</div>
-                    <button onClick={() => setIsModalOpen(true)} className="mt-6 w-full py-4 bg-blue-600 text-white rounded-xl font-bold shadow-lg flex justify-center gap-2"><IconWrapper name="plus" size={20}/> Adicionar</button>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {clients.map(c => (
+                            <div key={c.id} onClick={() => setSelectedClient(c)} className="bg-white p-4 rounded-xl shadow-sm border flex justify-between items-center cursor-pointer hover:shadow-md transition-all">
+                                <div className="flex items-center gap-3"><div className="bg-orange-100 p-3 rounded-full text-orange-600"><IconWrapper name="users" size={20}/></div><h3 className="font-bold">{c.name}</h3></div>
+                                <button onClick={(e) => {e.stopPropagation(); onDeleteClient(c.id)}} className="text-gray-300 hover:text-red-500"><IconWrapper name="trash-2" size={20}/></button>
+                            </div>
+                        ))}
+                    </div>
+                    <button onClick={() => setIsModalOpen(true)} className="mt-6 w-full py-4 bg-blue-600 text-white rounded-xl font-bold shadow-lg flex justify-center gap-2"><IconWrapper name="plus" size={20}/> Adicionar Cliente</button>
                     {isModalOpen && (
                         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
                             <div className="bg-white w-full max-w-sm rounded-2xl p-6 shadow-2xl">
@@ -421,41 +499,6 @@
                 }));
             };
 
-            const calculateTotalCost = () => {
-                let totalYarnCost = 0;
-                formData.yarns.forEach(yarn => {
-                    totalYarnCost += (yarn.price * (yarn.percentage / 100));
-                });
-
-                const weavBreak = formData.weavingBreakage || 0;
-                const efficiencyWeav = 1 - (weavBreak / 100);
-                const yarnCostAdjusted = efficiencyWeav > 0 ? totalYarnCost / efficiencyWeav : totalYarnCost;
-                const greigeCost = yarnCostAdjusted + (formData.weavingCost || 0);
-
-                const c1 = formData.colorCost1 || 0;
-                const c2 = formData.colorCost2 || 0;
-                const c3 = formData.colorCost3 || 0;
-                
-                let activeColors = 0;
-                let sumColors = 0;
-                if (c1 > 0) { sumColors += c1; activeColors++; }
-                if (c2 > 0) { sumColors += c2; activeColors++; }
-                if (c3 > 0) { sumColors += c3; activeColors++; }
-                
-                const avgColorCost = activeColors > 0 ? sumColors / activeColors : 0;
-
-                const dyeBreak = formData.dyeingBreakage || 0;
-                const efficiencyDye = 1 - (dyeBreak / 100);
-
-                const subTotalDyeing = greigeCost + avgColorCost;
-                const finalCost = efficiencyDye > 0 ? subTotalDyeing / efficiencyDye : subTotalDyeing;
-                
-                return {
-                    finalPrice: parseFloat(finalCost.toFixed(2)),
-                    avgDyeingCost: parseFloat(avgColorCost.toFixed(2))
-                };
-            };
-
             const handleAddExtraField = () => {
                 setFormData(prev => ({
                     ...prev,
@@ -474,63 +517,74 @@
             };
 
             return (
-                <div className="p-6 pb-24 min-h-screen bg-gray-50">
+                <div className="p-6 pb-24 min-h-screen bg-gray-50 content-wrapper">
                     <div className="flex items-center gap-3 mb-6"><button onClick={onBack} className="p-2 bg-white rounded-lg shadow-sm border border-gray-100 text-gray-600"><IconWrapper name="arrow-left" size={20}/></button><h1 className="text-xl font-bold">Editar Tecido</h1></div>
-                    <div className="bg-white p-6 rounded-2xl shadow-sm border mb-6 space-y-4">
-                        <input name="name" value={formData.name || ''} onChange={handleChange} placeholder="Nome" className="w-full p-3 border rounded-lg"/>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div><label className="text-xs">Unidade</label><select name="type" value={formData.type || 'Kg'} onChange={handleChange} className="w-full p-3 border rounded-lg"><option value="Kg">Kg</option><option value="M">M</option></select></div>
-                            <div><label className="text-xs font-bold text-pink-600">Preço Final</label><CurrencyInput value={formData.price} readOnly className="w-full p-3 bg-pink-50 border border-pink-200 rounded-lg text-pink-700 font-bold"/></div>
-                        </div>
-                        <div><label className="text-xs text-gray-500">Rendimento (Mts/Kg)</label><input type="number" step="0.01" name="yield" value={formData.yield||''} onChange={handleChange} className="w-full p-3 border rounded-lg"/></div>
-                    </div>
-                    {/* Fios Section */}
-                    <div className="bg-white p-6 rounded-2xl shadow-sm border mb-6 space-y-4">
-                        <div className="flex justify-between"><h3 className="font-bold">Fios</h3><button onClick={() => setFormData(prev => ({...prev, yarns: [...prev.yarns, {id: Date.now(), type:"", percentage:0, price:0}]}))} className="text-pink-600 font-bold text-xs">+ Add</button></div>
-                        {formData.yarns.map((y, i) => (
-                            <div key={y.id} className="grid grid-cols-12 gap-2 text-xs relative items-center">
-                                <input className="col-span-5 p-2 border rounded" placeholder="Tipo" value={y.type || ''} onChange={(e) => handleUpdateYarn(i, 'type', e.target.value)} />
-                                <div className="col-span-3 relative"><input className="w-full p-2 pr-4 border rounded" placeholder="%" type="number" value={y.percentage || ''} onChange={(e) => handleUpdateYarn(i, 'percentage', e.target.value)} /><span className="absolute right-1 top-2 text-gray-400">%</span></div>
-                                <div className="col-span-3"><CurrencyInput className="w-full p-2 border rounded" placeholder="R$" value={y.price} onChange={(val) => handleUpdateYarn(i, 'price', val)} /></div>
-                                <button onClick={() => handleAddYarn()} className="col-span-1 text-green-500 p-1"><IconWrapper name="plus" size={16}/></button>
-                                <button onClick={() => handleRemoveYarn(i)} className="col-span-1 text-red-500 p-1"><IconWrapper name="trash-2" size={16}/></button>
-                            </div>
-                        ))}
-                    </div>
-                    {/* Prod Costs */}
-                    <div className="bg-white p-6 rounded-2xl shadow-sm border mb-6 space-y-4">
-                        <h3 className="font-bold">Produção</h3>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div><label className="text-xs">Tecelagem R$</label><CurrencyInput name="weavingCost" value={formData.weavingCost} onChange={(val) => setFormData({...formData, weavingCost: val})} className="w-full p-2 border rounded"/></div>
-                            <div><label className="text-xs">Quebra Tec %</label><input type="number" name="weavingBreakage" value={formData.weavingBreakage || ''} onChange={handleChange} className="w-full p-2 border rounded"/></div>
-                        </div>
-                        <div className="grid grid-cols-3 gap-2">
-                            <CurrencyInput placeholder="Cor 1" value={formData.colorCost1} onChange={(val) => setFormData({...formData, colorCost1: val})} className="p-2 border rounded text-center"/>
-                            <CurrencyInput placeholder="Cor 2" value={formData.colorCost2} onChange={(val) => setFormData({...formData, colorCost2: val})} className="p-2 border rounded text-center"/>
-                            <CurrencyInput placeholder="Cor 3" value={formData.colorCost3} onChange={(val) => setFormData({...formData, colorCost3: val})} className="p-2 border rounded text-center"/>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div><label className="text-xs">Média Tint. R$</label><CurrencyInput value={formData.dyeingCost} readOnly className="w-full p-2 bg-gray-100 border rounded"/></div>
-                            <div><label className="text-xs">Quebra Tint %</label><input type="number" name="dyeingBreakage" value={formData.dyeingBreakage || ''} onChange={handleChange} className="w-full p-2 border rounded"/></div>
-                        </div>
-                    </div>
                     
-                    {formData.extraFields.length > 0 && (
-                        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 space-y-4 mb-6">
-                            {formData.extraFields.map((field, index) => (
-                                <div key={field.id} className="flex gap-2 items-start animate-fade-in">
-                                    <div className="flex-1 space-y-2">
-                                        <input type="text" placeholder="Nome do Campo" value={field.label || ''} onChange={(e) => handleUpdateExtraField(index, 'label', e.target.value)} className="w-full p-2 bg-gray-50 border border-gray-200 rounded text-xs font-bold text-gray-500 focus:outline-none focus:border-pink-300" />
-                                        <input type="text" placeholder="Valor" value={field.value || ''} onChange={(e) => handleUpdateExtraField(index, 'value', e.target.value)} className="w-full p-3 bg-white border border-gray-200 rounded-lg text-gray-800 focus:outline-none focus:ring-2 focus:ring-pink-500" />
-                                    </div>
-                                    <button onClick={() => handleAddExtraField()} className="p-2 text-green-500 hover:text-green-700 mt-6"><IconWrapper name="plus" size={20} /></button>
-                                    <button onClick={() => handleRemoveExtraField(index)} className="p-2 text-gray-300 hover:text-red-500 mt-6"><IconWrapper name="trash-2" size={20} /></button>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div className="space-y-6">
+                            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 space-y-4">
+                                <input name="name" value={formData.name || ''} onChange={handleChange} placeholder="Nome" className="w-full p-3 border rounded-lg"/>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div><label className="text-xs">Unidade</label><select name="type" value={formData.type || 'Kg'} onChange={handleChange} className="w-full p-3 border rounded-lg"><option value="Kg">Kg</option><option value="M">M</option></select></div>
+                                    <div><label className="text-xs font-bold text-pink-600">Preço Final</label><CurrencyInput value={formData.price} readOnly className="w-full p-3 bg-pink-50 border border-pink-200 rounded-lg text-pink-700 font-bold"/></div>
                                 </div>
-                            ))}
+                                <div><label className="text-xs text-gray-500">Rendimento (Mts/Kg)</label><input type="number" step="0.01" name="yield" value={formData.yield||''} onChange={handleChange} className="w-full p-3 border rounded-lg"/></div>
+                            </div>
+                            
+                            {/* Fios Section */}
+                            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 space-y-4">
+                                <div className="flex justify-between"><h3 className="font-bold">Fios</h3></div>
+                                {formData.yarns.map((y, i) => (
+                                    <div key={y.id} className="grid grid-cols-12 gap-2 text-xs relative items-center">
+                                        <input className="col-span-5 p-2 border rounded" placeholder="Tipo" value={y.type || ''} onChange={(e) => handleUpdateYarn(i, 'type', e.target.value)} />
+                                        <div className="col-span-3 relative"><input className="w-full p-2 pr-4 border rounded" placeholder="%" type="number" value={y.percentage || ''} onChange={(e) => handleUpdateYarn(i, 'percentage', e.target.value)} /><span className="absolute right-1 top-2 text-gray-400">%</span></div>
+                                        <div className="col-span-3"><CurrencyInput className="w-full p-2 border rounded" placeholder="R$" value={y.price} onChange={(val) => handleUpdateYarn(i, 'price', val)} /></div>
+                                        <button onClick={() => handleAddYarn()} className="col-span-1 text-green-500 p-1"><IconWrapper name="plus" size={16}/></button>
+                                        <button onClick={() => handleRemoveYarn(i)} className="col-span-1 text-red-500 p-1"><IconWrapper name="trash-2" size={16}/></button>
+                                    </div>
+                                ))}
+                                <button onClick={() => handleAddYarn()} className="w-full py-2 bg-pink-50 text-pink-600 font-bold rounded-lg flex items-center justify-center gap-2"><IconWrapper name="plus" size={16}/> Adicionar Fio</button>
+                            </div>
                         </div>
-                    )}
-                    
-                    <button onClick={() => onSave(formData)} className="w-full py-4 bg-pink-600 text-white rounded-xl font-bold">Salvar</button>
+
+                        <div className="space-y-6">
+                            {/* Prod Costs */}
+                            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 space-y-4">
+                                <h3 className="font-bold">Produção</h3>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div><label className="text-xs">Tecelagem R$</label><CurrencyInput name="weavingCost" value={formData.weavingCost} onChange={(val) => setFormData({...formData, weavingCost: val})} className="w-full p-2 border rounded"/></div>
+                                    <div><label className="text-xs">Quebra Tec %</label><input type="number" name="weavingBreakage" value={formData.weavingBreakage || ''} onChange={handleChange} className="w-full p-2 border rounded"/></div>
+                                </div>
+                                <div className="grid grid-cols-3 gap-2">
+                                    <CurrencyInput placeholder="Cor 1" value={formData.colorCost1} onChange={(val) => setFormData({...formData, colorCost1: val})} className="p-2 border rounded text-center"/>
+                                    <CurrencyInput placeholder="Cor 2" value={formData.colorCost2} onChange={(val) => setFormData({...formData, colorCost2: val})} className="p-2 border rounded text-center"/>
+                                    <CurrencyInput placeholder="Cor 3" value={formData.colorCost3} onChange={(val) => setFormData({...formData, colorCost3: val})} className="p-2 border rounded text-center"/>
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div><label className="text-xs">Média Tint. R$</label><CurrencyInput value={formData.dyeingCost} readOnly className="w-full p-2 bg-gray-100 border rounded"/></div>
+                                    <div><label className="text-xs">Quebra Tint %</label><input type="number" name="dyeingBreakage" value={formData.dyeingBreakage || ''} onChange={handleChange} className="w-full p-2 border rounded"/></div>
+                                </div>
+                            </div>
+                            
+                            {formData.extraFields.length > 0 && (
+                                <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 space-y-4">
+                                    {formData.extraFields.map((field, index) => (
+                                        <div key={field.id} className="flex gap-2 items-start animate-fade-in">
+                                            <div className="flex-1 space-y-2">
+                                                <input type="text" placeholder="Nome do Campo" value={field.label || ''} onChange={(e) => handleUpdateExtraField(index, 'label', e.target.value)} className="w-full p-2 bg-gray-50 border border-gray-200 rounded text-xs font-bold text-gray-500 focus:outline-none focus:border-pink-300" />
+                                                <input type="text" placeholder="Valor" value={field.value || ''} onChange={(e) => handleUpdateExtraField(index, 'value', e.target.value)} className="w-full p-3 bg-white border border-gray-200 rounded-lg text-gray-800 focus:outline-none focus:ring-2 focus:ring-pink-500" />
+                                            </div>
+                                            <button onClick={() => handleAddExtraField()} className="p-2 text-green-500 hover:text-green-700 mt-6"><IconWrapper name="plus" size={20} /></button>
+                                            <button onClick={() => handleRemoveExtraField(index)} className="p-2 text-gray-300 hover:text-red-500 mt-6"><IconWrapper name="trash-2" size={20} /></button>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                            <button onClick={() => handleAddExtraField()} className="w-full py-2 bg-pink-50 text-pink-600 font-bold rounded-lg flex items-center justify-center gap-2"><IconWrapper name="plus" size={16}/> Adicionar Campo Extra</button>
+                        </div>
+                    </div>
+
+                    <button onClick={() => onSave(formData)} className="w-full py-4 bg-pink-600 text-white rounded-xl font-bold mt-6">Salvar</button>
                 </div>
             );
         };
@@ -545,14 +599,16 @@
             if(selectedFabric) return <FabricDetail fabric={selectedFabric} onBack={() => setSelectedFabric(null)} onSave={(d) => { onUpdateFabric(d); setSelectedFabric(null); }} />;
 
             return (
-                <div className="p-6 pb-24 min-h-screen relative">
+                <div className="p-6 pb-24 min-h-screen relative content-wrapper">
                     <div className="flex items-center gap-3 mb-6"><button onClick={() => setScreen('home')} className="p-2 bg-white rounded-lg shadow-sm border border-gray-100 text-gray-600"><IconWrapper name="arrow-left" size={20}/></button><h1 className="text-xl font-bold text-slate-800">Meus Tecidos</h1></div>
-                    <div className="space-y-3">{fabrics.map(f => (
-                        <div key={f.id} onClick={() => setSelectedFabric(f)} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex justify-between items-center cursor-pointer">
-                            <div className="flex items-center gap-3"><div className="bg-pink-100 p-3 rounded-full text-pink-600"><IconWrapper name={f.type === 'Kg' ? 'scale' : 'ruler'} size={20}/></div><div><h3 className="font-bold text-gray-800 text-sm">{f.name}</h3><p className="text-xs text-gray-500">R$ {(f.price || 0).toFixed(2)} / {f.type}</p></div></div>
-                            <button onClick={(e) => { e.stopPropagation(); onDeleteFabric(f.id); }} className="text-gray-300 hover:text-red-500"><IconWrapper name="trash-2" size={20}/></button>
-                        </div>
-                    ))}</div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {fabrics.map(f => (
+                            <div key={f.id} onClick={() => setSelectedFabric(f)} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex justify-between items-center cursor-pointer hover:shadow-md transition-all">
+                                <div className="flex items-center gap-3"><div className="bg-pink-100 p-3 rounded-full text-pink-600"><IconWrapper name={f.type === 'Kg' ? 'scale' : 'ruler'} size={20}/></div><div><h3 className="font-bold text-gray-800 text-sm">{f.name}</h3><p className="text-xs text-gray-500">R$ {(f.price || 0).toFixed(2)} / {f.type}</p></div></div>
+                                <button onClick={(e) => { e.stopPropagation(); onDeleteFabric(f.id); }} className="text-gray-300 hover:text-red-500"><IconWrapper name="trash-2" size={20}/></button>
+                            </div>
+                        ))}
+                    </div>
                     <button onClick={() => setIsModalOpen(true)} className="mt-6 w-full py-4 bg-pink-600 text-white rounded-xl font-bold shadow-lg flex justify-center gap-2"><IconWrapper name="plus" size={20}/> Cadastrar Tecido</button>
                     {isModalOpen && (
                         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -584,15 +640,17 @@
             const total = costs.reduce((a, b) => a + (b.value || 0), 0);
 
             return (
-                <div className="p-6 pb-24 min-h-screen bg-gray-50 relative">
+                <div className="p-6 pb-24 min-h-screen bg-gray-50 relative content-wrapper">
                     <div className="flex items-center gap-3 mb-6"><button onClick={() => setScreen('home')} className="p-2 bg-white rounded-lg shadow-sm border border-gray-100 text-gray-600"><IconWrapper name="arrow-left" size={20}/></button><h1 className="text-xl font-bold">Custos Fixos</h1></div>
                     <div className="bg-indigo-600 rounded-2xl p-6 text-white mb-6 shadow-lg"><p className="text-indigo-200 text-sm">Total Mensal</p><h2 className="text-3xl font-bold">R$ {total.toFixed(2)}</h2></div>
-                    <div className="bg-white rounded-xl shadow-sm border overflow-hidden">{costs.map(c => (
-                        <div key={c.id} onClick={() => openEdit(c)} className="p-4 flex justify-between items-center border-b last:border-0 cursor-pointer hover:bg-gray-50">
-                            <span className="font-medium text-gray-700">{c.name}</span>
-                            <div className="flex gap-4 items-center"><span className="font-bold">R$ {(c.value || 0).toFixed(2)}</span><button onClick={(e) => {e.stopPropagation(); onDeleteCost(c.id)}} className="text-gray-300 hover:text-red-500"><IconWrapper name="trash-2" size={18}/></button></div>
-                        </div>
-                    ))}</div>
+                    <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+                        {costs.map(c => (
+                            <div key={c.id} onClick={() => openEdit(c)} className="p-4 flex justify-between items-center border-b last:border-0 cursor-pointer hover:bg-gray-50">
+                                <span className="font-medium text-gray-700">{c.name}</span>
+                                <div className="flex gap-4 items-center"><span className="font-bold">R$ {(c.value || 0).toFixed(2)}</span><button onClick={(e) => {e.stopPropagation(); onDeleteCost(c.id)}} className="text-gray-300 hover:text-red-500"><IconWrapper name="trash-2" size={18}/></button></div>
+                            </div>
+                        ))}
+                    </div>
                     <button onClick={openNew} className="mt-6 w-full py-4 bg-indigo-600 text-white rounded-xl font-bold shadow-lg flex justify-center gap-2"><IconWrapper name="plus" size={20}/> Adicionar Custo</button>
                     {isModalOpen && (
                         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -626,15 +684,17 @@
             const total = costs.reduce((a, b) => a + b.percentage, 0);
 
             return (
-                <div className="p-6 pb-24 min-h-screen bg-gray-50 relative">
+                <div className="p-6 pb-24 min-h-screen bg-gray-50 relative content-wrapper">
                     <div className="flex items-center gap-3 mb-6"><button onClick={() => setScreen('home')} className="p-2 bg-white rounded-lg shadow-sm border border-gray-100 text-gray-600"><IconWrapper name="arrow-left" size={20}/></button><h1 className="text-xl font-bold">Custos Variáveis</h1></div>
                     <div className="bg-violet-600 rounded-2xl p-6 text-white mb-6 shadow-lg"><p className="text-violet-200 text-sm">Total Mark-up</p><h2 className="text-3xl font-bold">{total.toFixed(2)}%</h2></div>
-                    <div className="bg-white rounded-xl shadow-sm border overflow-hidden">{costs.map(c => (
-                        <div key={c.id} onClick={() => openEdit(c)} className="p-4 flex justify-between items-center border-b last:border-0 cursor-pointer hover:bg-gray-50">
-                            <span className="font-medium text-gray-700">{c.name}</span>
-                            <div className="flex gap-4 items-center"><span className="font-bold">{c.percentage.toFixed(2)}%</span><button onClick={(e) => {e.stopPropagation(); onDeleteCost(c.id)}} className="text-gray-300 hover:text-red-500"><IconWrapper name="trash-2" size={18}/></button></div>
-                        </div>
-                    ))}</div>
+                    <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
+                        {costs.map(c => (
+                            <div key={c.id} onClick={() => openEdit(c)} className="p-4 flex justify-between items-center border-b last:border-0 cursor-pointer hover:bg-gray-50">
+                                <span className="font-medium text-gray-700">{c.name}</span>
+                                <div className="flex gap-4 items-center"><span className="font-bold">{c.percentage.toFixed(2)}%</span><button onClick={(e) => {e.stopPropagation(); onDeleteCost(c.id)}} className="text-gray-300 hover:text-red-500"><IconWrapper name="trash-2" size={18}/></button></div>
+                            </div>
+                        ))}
+                    </div>
                     <button onClick={openNew} className="mt-6 w-full py-4 bg-violet-600 text-white rounded-xl font-bold shadow-lg flex justify-center gap-2"><IconWrapper name="plus" size={20}/> Adicionar Taxa</button>
                     {isModalOpen && (
                         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -666,13 +726,13 @@
             });
 
             return (
-                <div className="p-6 pb-24 min-h-screen bg-gray-50">
+                <div className="p-6 pb-24 min-h-screen bg-gray-50 content-wrapper">
                     <div className="flex items-center gap-3 mb-6"><h1 className="text-xl font-bold text-slate-800">Pesquisar / Produtos</h1></div>
                     <div className="relative mb-6"><input type="text" placeholder="Buscar..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full p-4 pl-12 bg-white border border-gray-200 rounded-xl shadow-sm outline-none focus:ring-2 focus:ring-blue-500 text-gray-700" /><div className="absolute left-4 top-4 text-gray-400"><IconWrapper name="search" size={20} /></div></div>
-                    <div className="space-y-3">
-                        {displayList.length === 0 ? <p className="text-center text-gray-400 py-10">Nada encontrado.</p> : 
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {displayList.length === 0 ? <p className="text-center text-gray-400 py-10 w-full col-span-full">Nada encontrado.</p> : 
                         displayList.map(prod => (
-                            <div key={prod.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-3">
+                            <div key={prod.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-3 hover:shadow-md transition-all">
                                 <div>
                                     <div className="flex items-center gap-2 mb-1"><span className="font-bold text-gray-800">{prod.reference}</span><span className="text-gray-400">•</span><span className="text-gray-600 text-sm">{prod.description}</span></div>
                                     <div className="text-xs text-gray-500 mb-2">{getClientName(prod.clientId)} • {prod.date}</div>
@@ -698,7 +758,7 @@
                 sewingCost: 0, printingCost: 0, trimsCost: 0, cuttingCost: 0, extraServices: [], clientInputsCost: 0,
                 taxPct: 0, commissionPct: 0, marginPct: 0, freightPct: 0, expensesPct: 0, financialPct: 0, negotiationPct: 0
             });
-            const descriptionInputRef = useRef(null); // Ref para o campo descrição
+            const descriptionInputRef = useRef(null); 
 
             useEffect(() => {
                 if (initialData) setProduct({ ...initialData, extraServices: initialData.extraServices || [] });
@@ -707,8 +767,6 @@
             // Auto-preenchimento da Descrição e Validação
             const handleRefChange = (val) => {
                 const upper = val.toUpperCase();
-                
-                // Valida duplicidade
                 if(upper && (!initialData || initialData.reference !== upper)) {
                      const isDup = products.some(p => p.reference === upper && p.id !== product.id);
                      setRefError(isDup ? "Referência já existe!" : "");
@@ -720,8 +778,6 @@
                     const oldRef = prev.reference;
                     let desc = prev.description;
                     const pOld = `${oldRef} - `; const pNew = `${upper} - `;
-                    
-                    // Atualiza o prefixo da descrição se estiver vazio ou seguir o padrão
                     if(desc === "" || desc.startsWith(pOld)) {
                         desc = pNew + (desc.startsWith(pOld) ? desc.slice(pOld.length) : "");
                     }
@@ -729,7 +785,6 @@
                 });
             };
 
-            // Impede apagar o prefixo da descrição
             const handleDescriptionChange = (e) => {
                 const val = capitalize(e.target.value);
                 const prefix = `${product.reference} - `;
@@ -740,7 +795,6 @@
                 }
             };
             
-            // Move cursor para o final ao focar na descrição
             const handleDescriptionFocus = (e) => {
                 const val = e.target.value;
                 e.target.setSelectionRange(val.length, val.length);
@@ -825,7 +879,7 @@
                 let fabTotal = product.selectedFabrics.reduce((a, b) => a + (b.value || 0), 0);
                 let extraTotal = product.extraServices.reduce((a, b) => a + (b.cost || 0), 0);
                 const rawDirect = fabTotal + (product.sewingCost||0) + (product.printingCost||0) + (product.trimsCost||0) + (product.cuttingCost||0) + extraTotal + (product.clientInputsCost || 0);
-                const totalDirect = rawDirect / 0.97; // Quebra 3%
+                const totalDirect = rawDirect / 0.97; 
                 
                 const group1 = ((product.taxPct||0) + (product.commissionPct||0) + (product.expensesPct||0) + (product.marginPct||0) + (product.freightPct||0))/100;
                 const group2 = ((product.negotiationPct||0) + (product.financialPct||0))/100;
@@ -840,7 +894,7 @@
             const t = calcTotals();
 
             return (
-                <div className="p-6 pb-24 min-h-screen bg-gray-50">
+                <div className="p-6 pb-24 min-h-screen bg-gray-50 content-wrapper">
                     <div className="flex items-center gap-3 mb-6"><button onClick={() => setScreen('home')} className="p-2 bg-white rounded-lg shadow-sm border border-gray-100 text-gray-600"><IconWrapper name="arrow-left" size={20}/></button><h1 className="text-xl font-bold">{initialData && initialData.id ? 'Editar' : 'Novo'} Cálculo</h1></div>
                     
                     <div className="flex gap-2 mb-6">
@@ -848,8 +902,8 @@
                     </div>
 
                     {step === 1 && (
-                        <div className="space-y-4 animate-fade-in">
-                            <div className="bg-white p-5 rounded-2xl shadow-sm border space-y-4">
+                        <div className="space-y-4 animate-fade-in grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="bg-white p-5 rounded-2xl shadow-sm border space-y-4 h-fit">
                                 <h3 className="font-bold flex items-center gap-2">Identificação</h3>
                                 <input value={product.reference || ''} onChange={e => handleRefChange(e.target.value)} className={`w-full p-3 border rounded-lg ${refError ? 'border-red-500' : ''} uppercase`} placeholder="Referência (Ex: 21115)"/>
                                 {refError && <p className="text-red-500 text-xs">{refError}</p>}
@@ -863,7 +917,7 @@
                                 />
                                 <select value={product.clientId || ''} onChange={handleClientChange} className="w-full p-3 border rounded-lg"><option value="">Selecione Cliente...</option>{clients.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select>
                             </div>
-                            <button onClick={() => !refError && setStep(2)} disabled={!!refError} className={`w-full py-4 rounded-xl font-bold text-white ${refError ? 'bg-gray-300' : 'bg-blue-600'}`}>Próximo</button>
+                            <button onClick={() => !refError && setStep(2)} disabled={!!refError} className={`w-full py-4 rounded-xl font-bold text-white ${refError ? 'bg-gray-300' : 'bg-blue-600'} self-end`}>Próximo</button>
                         </div>
                     )}
 
@@ -871,7 +925,7 @@
                         <div className="space-y-4 animate-fade-in">
                             <div className="bg-white p-5 rounded-2xl shadow-sm border">
                                 <div className="flex justify-between mb-4"><h3 className="font-bold">Tecidos</h3><button onClick={addFabric} className="text-xs font-bold text-blue-600">+ Adicionar</button></div>
-                                <div className="space-y-4">
+                                <div className="space-y-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
                                     {product.selectedFabrics.map((f, i) => (
                                         <div key={f.id} className="bg-gray-50 p-4 rounded-lg border border-gray-200">
                                             <div className="flex justify-between mb-2">
@@ -893,7 +947,7 @@
                                             <div className="flex justify-between bg-gray-100 p-2 rounded"><span className="text-xs font-bold">CUSTO</span><span className="font-bold text-sm">R$ {(f.value || 0).toFixed(2)}</span></div>
                                         </div>
                                     ))}
-                                    <div className="pt-2 border-t flex justify-between"><span className="text-sm">Total Tecidos</span><span className="font-bold">R$ {t.fabTotal.toFixed(2)}</span></div>
+                                    <div className="pt-2 border-t flex justify-between col-span-full"><span className="text-sm">Total Tecidos</span><span className="font-bold">R$ {t.fabTotal.toFixed(2)}</span></div>
                                 </div>
                             </div>
                             <div className="bg-white p-5 rounded-2xl shadow-sm border">
@@ -914,8 +968,8 @@
                                         <div key={s.id} className="flex gap-2 mb-2">
                                             <input className="flex-1 p-1 border rounded text-sm" placeholder="Nome" value={s.name || ''} onChange={e => { const ns = [...product.extraServices]; ns[i].name = e.target.value; setProduct({...product, extraServices: ns}); }}/>
                                             <div className="w-20"><CurrencyInput value={s.cost} onChange={v => { const ns = [...product.extraServices]; ns[i].cost = v; setProduct({...product, extraServices: ns}); }} className="w-full p-1 border rounded text-sm"/></div>
-                                            <button onClick={() => setProduct(prev => ({...prev, extraServices: prev.extraServices.filter((_, idx) => idx !== i)}))} className="text-red-400"><IconWrapper name="trash-2" size={16}/></button>
                                             <button onClick={addServiceRow} className="text-green-500"><IconWrapper name="plus" size={16}/></button>
+                                            <button onClick={() => setProduct(prev => ({...prev, extraServices: prev.extraServices.filter((_, idx) => idx !== i)}))} className="text-red-400"><IconWrapper name="trash-2" size={16}/></button>
                                         </div>
                                     ))}
                                 </div>
@@ -925,66 +979,23 @@
                     )}
 
                     {step === 3 && (
-                        <div className="space-y-4 animate-fade-in">
-                            <div className="bg-slate-800 p-6 rounded-2xl text-center text-white shadow-xl">
+                        <div className="space-y-4 animate-fade-in grid grid-cols-1 lg:grid-cols-2 gap-6">
+                            <div className="bg-slate-800 p-6 rounded-2xl text-center text-white shadow-xl h-fit">
                                 <p className="text-slate-300 text-sm">Preço Sugerido</p>
                                 <h2 className="text-4xl font-bold mb-2">R$ {t.suggestedPrice.toFixed(2)}</h2>
                                 <div className="bg-slate-700 inline-block px-3 py-1 rounded-full text-xs">Custo Prod: R$ {t.totalDirectCost.toFixed(2)} (c/ 3% quebra)</div>
                             </div>
                             <div className="bg-white p-5 rounded-2xl shadow-sm border space-y-3">
                                 <h3 className="font-bold mb-2">Mark-up</h3>
-                                {/* Campos habilitados para edição (input) */}
-                                <div className="flex justify-between items-center text-sm">
-                                    <span>Impostos</span>
-                                    <div className="flex items-center gap-1 w-20">
-                                        <input type="number" value={product.taxPct || ''} onChange={(e) => setProduct({...product, taxPct: parseFloat(e.target.value)||0})} className="w-full p-1 border rounded text-right text-sm" />
-                                        <span>%</span>
-                                    </div>
-                                </div>
-                                <div className="flex justify-between items-center text-sm">
-                                    <span>Comissão</span>
-                                    <div className="flex items-center gap-1 w-20">
-                                        <input type="number" value={product.commissionPct || ''} onChange={(e) => setProduct({...product, commissionPct: parseFloat(e.target.value)||0})} className="w-full p-1 border rounded text-right text-sm" />
-                                        <span>%</span>
-                                    </div>
-                                </div>
-                                <div className="flex justify-between items-center text-sm">
-                                    <span>MD</span>
-                                    <div className="flex items-center gap-1 w-20">
-                                        <input type="number" value={product.expensesPct || ''} onChange={(e) => setProduct({...product, expensesPct: parseFloat(e.target.value)||0})} className="w-full p-1 border rounded text-right text-sm" />
-                                        <span>%</span>
-                                    </div>
-                                </div>
-                                <div className="flex justify-between items-center text-sm">
-                                    <span>Financeiro</span>
-                                    <div className="flex items-center gap-1 w-20">
-                                        <input type="number" value={product.financialPct || ''} onChange={(e) => setProduct({...product, financialPct: parseFloat(e.target.value)||0})} className="w-full p-1 border rounded text-right text-sm" />
-                                        <span>%</span>
-                                    </div>
-                                </div>
-                                <div className="flex justify-between items-center text-sm">
-                                    <span>Negociação</span>
-                                    <div className="flex items-center gap-1 w-20">
-                                        <input type="number" value={product.negotiationPct || ''} onChange={(e) => setProduct({...product, negotiationPct: parseFloat(e.target.value)||0})} className="w-full p-1 border rounded text-right text-sm" />
-                                        <span>%</span>
-                                    </div>
-                                </div>
-                                <div className="flex justify-between items-center text-sm font-bold text-green-600">
-                                    <span>Lucro</span>
-                                    <div className="flex items-center gap-1 w-20">
-                                        <input type="number" value={product.marginPct || ''} onChange={(e) => setProduct({...product, marginPct: parseFloat(e.target.value)||0})} className="w-full p-1 border rounded text-right text-sm font-bold text-green-600" />
-                                        <span>%</span>
-                                    </div>
-                                </div>
-                                <div className="flex justify-between items-center text-sm">
-                                    <span>Frete</span>
-                                    <div className="flex items-center gap-1 w-20">
-                                        <input type="number" value={product.freightPct || ''} onChange={(e) => setProduct({...product, freightPct: parseFloat(e.target.value)||0})} className="w-full p-1 border rounded text-right text-sm" />
-                                        <span>%</span>
-                                    </div>
-                                </div>
+                                <div className="flex justify-between items-center text-sm"><span>Impostos</span><div className="flex items-center gap-1 w-20"><input type="number" value={product.taxPct || ''} onChange={(e) => setProduct({...product, taxPct: parseFloat(e.target.value)||0})} className="w-full p-1 border rounded text-right text-sm" /><span>%</span></div></div>
+                                <div className="flex justify-between items-center text-sm"><span>Comissão</span><div className="flex items-center gap-1 w-20"><input type="number" value={product.commissionPct || ''} onChange={(e) => setProduct({...product, commissionPct: parseFloat(e.target.value)||0})} className="w-full p-1 border rounded text-right text-sm" /><span>%</span></div></div>
+                                <div className="flex justify-between items-center text-sm"><span>MD</span><div className="flex items-center gap-1 w-20"><input type="number" value={product.expensesPct || ''} onChange={(e) => setProduct({...product, expensesPct: parseFloat(e.target.value)||0})} className="w-full p-1 border rounded text-right text-sm" /><span>%</span></div></div>
+                                <div className="flex justify-between items-center text-sm"><span>Financeiro</span><div className="flex items-center gap-1 w-20"><input type="number" value={product.financialPct || ''} onChange={(e) => setProduct({...product, financialPct: parseFloat(e.target.value)||0})} className="w-full p-1 border rounded text-right text-sm" /><span>%</span></div></div>
+                                <div className="flex justify-between items-center text-sm"><span>Negociação</span><div className="flex items-center gap-1 w-20"><input type="number" value={product.negotiationPct || ''} onChange={(e) => setProduct({...product, negotiationPct: parseFloat(e.target.value)||0})} className="w-full p-1 border rounded text-right text-sm" /><span>%</span></div></div>
+                                <div className="flex justify-between items-center text-sm font-bold text-green-600"><span>Lucro</span><div className="flex items-center gap-1 w-20"><input type="number" value={product.marginPct || ''} onChange={(e) => setProduct({...product, marginPct: parseFloat(e.target.value)||0})} className="w-full p-1 border rounded text-right text-sm font-bold text-green-600" /><span>%</span></div></div>
+                                <div className="flex justify-between items-center text-sm"><span>Frete</span><div className="flex items-center gap-1 w-20"><input type="number" value={product.freightPct || ''} onChange={(e) => setProduct({...product, freightPct: parseFloat(e.target.value)||0})} className="w-full p-1 border rounded text-right text-sm" /><span>%</span></div></div>
                             </div>
-                            <div className="flex gap-3">
+                            <div className="flex gap-3 col-span-full">
                                 <button onClick={() => setStep(2)} className="flex-1 py-4 bg-gray-100 rounded-xl font-bold">Voltar</button>
                                 <button onClick={() => { 
                                     onSaveProduct({
@@ -1043,7 +1054,7 @@
             };
 
             return (
-                <div className="p-6 pb-24 min-h-screen bg-gray-50">
+                <div className="p-6 pb-24 min-h-screen bg-gray-50 content-wrapper">
                     <div className="flex items-center gap-3 mb-6"><button onClick={() => setScreen('home')} className="p-2 bg-white rounded-lg shadow-sm border border-gray-100 text-gray-600"><IconWrapper name="arrow-left" size={20}/></button><h1 className="text-xl font-bold">Ajustes & Backup</h1></div>
                     
                     <div className="bg-white p-6 rounded-2xl shadow-sm border space-y-6">
@@ -1093,28 +1104,6 @@
                 { id: 2, name: "Comissão", percentage: 5.00 }
             ]);
 
-            // Add global ESC listener
-            useEffect(() => {
-                const handleEsc = (e) => {
-                    if (e.key === 'Escape') {
-                        if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'SELECT' || document.activeElement.tagName === 'TEXTAREA')) {
-                            // Find all focusable elements
-                            const focusable = Array.from(document.querySelectorAll('input:not([type="hidden"]), select, textarea'));
-                            const index = focusable.indexOf(document.activeElement);
-                            
-                            if (index > 0) {
-                                focusable[index - 1].focus();
-                                e.preventDefault(); // Prevent default ESC behavior if needed
-                            } else {
-                                document.activeElement.blur();
-                            }
-                        }
-                    }
-                };
-                window.addEventListener('keydown', handleEsc);
-                return () => window.removeEventListener('keydown', handleEsc);
-            }, []);
-
             const handleSaveProduct = (product) => {
                 const exists = products.some(p => p.id === product.id);
                 if (exists) updateProduct(product);
@@ -1140,14 +1129,16 @@
             };
 
             return (
-                <div className="app-container font-sans bg-gray-50">
-                    {renderScreen()}
-                    <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 p-3 flex justify-around items-center max-w-[480px] mx-auto z-50">
-                        <button onClick={() => setCurrentScreen('home')} className={`flex flex-col items-center gap-1 ${currentScreen === 'home' ? 'text-blue-600' : 'text-gray-400'}`}><IconWrapper name="home" size={20}/><span className="text-[10px] font-medium">Início</span></button>
-                        <button onClick={() => setCurrentScreen('clients')} className={`flex flex-col items-center gap-1 ${currentScreen === 'clients' ? 'text-blue-600' : 'text-gray-400'}`}><IconWrapper name="users" size={20}/><span className="text-[10px] font-medium">Clientes</span></button>
-                        <div className="relative -top-5"><button onClick={() => { setEditingProduct(null); setCurrentScreen('calculator'); }} className="bg-blue-600 text-white p-4 rounded-full shadow-lg hover:bg-blue-700 transition-colors"><IconWrapper name="plus" size={24}/></button></div>
-                        <button onClick={() => setCurrentScreen('fabrics')} className={`flex flex-col items-center gap-1 ${currentScreen === 'fabrics' ? 'text-blue-600' : 'text-gray-400'}`}><IconWrapper name="scissors" size={20}/><span className="text-[10px] font-medium">Tecidos</span></button>
-                        <button onClick={() => setCurrentScreen('search')} className={`flex flex-col items-center gap-1 ${currentScreen === 'search' ? 'text-blue-600' : 'text-gray-400'}`}><IconWrapper name="search" size={20}/><span className="text-[10px] font-medium">Pesquisar</span></button>
+                <div className="app-container">
+                    <div className="content-wrapper">
+                        {renderScreen()}
+                    </div>
+                    <div className="bottom-nav">
+                        <button onClick={() => setCurrentScreen('home')} className={`flex flex-col items-center gap-1 ${currentScreen === 'home' ? 'text-blue-600' : 'text-gray-400'}`}><IconWrapper name="home" size={24}/><span className="text-[10px] font-medium hidden md:block">Início</span></button>
+                        <button onClick={() => setCurrentScreen('clients')} className={`flex flex-col items-center gap-1 ${currentScreen === 'clients' ? 'text-blue-600' : 'text-gray-400'}`}><IconWrapper name="users" size={24}/><span className="text-[10px] font-medium hidden md:block">Clientes</span></button>
+                        <div className="relative -top-6"><button onClick={() => { setEditingProduct(null); setCurrentScreen('calculator'); }} className="bg-blue-600 text-white p-4 rounded-full shadow-lg hover:bg-blue-700 transition-colors transform hover:scale-105 active:scale-95"><IconWrapper name="plus" size={28}/></button></div>
+                        <button onClick={() => setCurrentScreen('fabrics')} className={`flex flex-col items-center gap-1 ${currentScreen === 'fabrics' ? 'text-blue-600' : 'text-gray-400'}`}><IconWrapper name="scissors" size={24}/><span className="text-[10px] font-medium hidden md:block">Tecidos</span></button>
+                        <button onClick={() => setCurrentScreen('search')} className={`flex flex-col items-center gap-1 ${currentScreen === 'search' ? 'text-blue-600' : 'text-gray-400'}`}><IconWrapper name="search" size={24}/><span className="text-[10px] font-medium hidden md:block">Pesquisar</span></button>
                     </div>
                 </div>
             );
