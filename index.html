@@ -35,14 +35,14 @@
         .app-container { 
             width: 100%;
             min-height: 100vh; 
-            background: #f9fafb; /* Fundo ligeiramente cinza para contraste no PC */
+            background: #f9fafb; 
             position: relative; 
             overflow-x: hidden;
         }
 
         /* Área de Conteúdo Centralizada para PC */
         .content-wrapper {
-            max-width: 1400px; /* Limite de largura para não ficar muito esticado em telas ultrawide */
+            max-width: 1400px;
             margin: 0 auto;
             padding-bottom: 100px; /* Espaço para o menu inferior */
         }
@@ -95,7 +95,7 @@
     <!-- MÓDULO FIREBASE -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
         import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
         // CONFIGURAÇÃO DO FIREBASE (LPM CUSTOS)
@@ -113,12 +113,14 @@
             app = initializeApp(firebaseConfig);
             db = getFirestore(app);
             auth = getAuth(app);
+            // Login anónimo para permitir leitura/escrita segura por utilizador
             signInAnonymously(auth).catch((error) => console.error("Erro auth:", error));
         } catch (e) {
             console.error("Erro Firebase:", e);
         }
 
-        window.AppServices = { db, auth, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, onAuthStateChanged, getDocs, writeBatch };
+        // Expor serviços para o React
+        window.AppServices = { db, auth, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, onAuthStateChanged };
     </script>
 
     <!-- CÓDIGO DA APLICAÇÃO (REACT) -->
@@ -145,7 +147,14 @@
                             const q = query(collection(db, `users/${user.uid}/${collectionName}`));
                             const unsubscribe = onSnapshot(q, (snapshot) => {
                                 const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                                // Se houver dados, usa.
+                                
+                                // ORDENAÇÃO: Garante que os itens mais recentes (maior timestamp) venham primeiro
+                                items.sort((a, b) => {
+                                    const timeA = a.timestamp || (typeof a.id === 'number' ? a.id : 0);
+                                    const timeB = b.timestamp || (typeof b.id === 'number' ? b.id : 0);
+                                    return timeB - timeA;
+                                });
+
                                 if (items.length > 0) setData(items);
                                 else if (defaultValue && defaultValue.length > 0 && items.length === 0) {
                                     setData(defaultValue);
@@ -167,9 +176,9 @@
             const add = async (item) => {
                 const { auth, db, collection, addDoc } = window.AppServices;
                 if (!auth.currentUser) return;
-                const { id, ...cleanItem } = item;
-                // Adiciona timestamp para ordenação
-                if (!cleanItem.timestamp) cleanItem.timestamp = Date.now();
+                const { id, ...cleanItem } = item; 
+                // Garante timestamp na criação
+                cleanItem.timestamp = Date.now();
                 await addDoc(collection(db, `users/${auth.currentUser.uid}/${collectionName}`), cleanItem);
             };
 
@@ -210,6 +219,7 @@
             return str.toLowerCase().replace(/(?:^|\s|["'([{])+\S/g, match => match.toUpperCase());
         };
 
+        // --- Componentes de Ícones (Lucide) ---
         const Icon = ({ name, size = 24, color = "currentColor", className="" }) => {
             if (!window.lucide) return null;
             return <i data-lucide={name} className={className} style={{ width: size, height: size, color: color, display: 'inline-block' }}></i>;
@@ -271,7 +281,7 @@
         };
 
         const MenuCard = ({ title, subtitle, icon, color, onClick }) => (
-            <div onClick={onClick} className="app-card bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between cursor-pointer h-full">
+            <div onClick={onClick} className="app-card bg-white p-5 rounded-2xl shadow-sm border border-gray-100 flex items-center justify-between mb-4 cursor-pointer hover:shadow-md transition-all active:scale-95 h-full">
                 <div className="flex items-center gap-4">
                     <div className={`p-3 rounded-xl ${color} text-white flex items-center justify-center`}><IconWrapper name={icon} size={24} /></div>
                     <div><h3 className="font-bold text-gray-800 text-lg">{title}</h3><p className="text-gray-500 text-sm">{subtitle}</p></div>
@@ -316,12 +326,11 @@
 
         // --- SCREENS ---
         const HomeScreen = ({ setScreen, products }) => {
-            // Ordenação por Timestamp
-            const sortedProducts = [...products].sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-            const lastProduct = sortedProducts.length > 0 ? sortedProducts[0] : null;
+            // Produtos já vêm ordenados pelo useData (do mais recente para o mais antigo)
+            const lastProduct = products && products.length > 0 ? products[0] : null;
 
             return (
-                <div className="p-6 animate-fade-in content-wrapper">
+                <div className="p-6 pb-24 animate-fade-in content-wrapper">
                     <header className="flex justify-between items-center mb-6">
                         <div><h1 className="text-2xl font-bold text-slate-800">Confecção Cost</h1><p className="text-gray-500 text-sm">Controle sua produção</p></div>
                         <div className="flex gap-2">
@@ -392,6 +401,7 @@
                                     <div key={inp.id} className="flex gap-2 items-center">
                                         <input className="flex-1 p-2 border rounded text-sm" placeholder="Nome" value={inp.name || ''} onChange={e=>handleUpdateInput(i,'name',e.target.value)} />
                                         <div className="w-24"><CurrencyInput value={inp.cost} onChange={(val)=>handleUpdateInput(i,'cost',val)} className="w-full p-2 border rounded text-sm"/></div>
+                                        <button onClick={()=>handleAddInput()} className="text-green-500 p-2"><IconWrapper name="plus" size={18}/></button>
                                         <button onClick={()=>handleRemoveInput(i)} className="text-red-400 p-2"><IconWrapper name="trash-2" size={18}/></button>
                                     </div>
                                 ))}
@@ -401,7 +411,9 @@
                             <div className="flex justify-between items-center"><h3 className="font-bold">Extras</h3></div>
                             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 space-y-2">
                                 {formData.extraFields.map((ex, i) => (
-                                    <div key={ex.id} className="flex gap-2"><input className="flex-1 p-2 border rounded text-sm" placeholder="Campo" value={ex.label || ''} onChange={e=>handleUpdateExtra(i,'label',e.target.value)} /><input className="flex-1 p-2 border rounded text-sm" placeholder="Valor" value={ex.value || ''} onChange={e=>handleUpdateExtra(i,'value',e.target.value)} /><button onClick={()=>handleRemoveExtra(i)} className="text-red-400 p-2"><IconWrapper name="trash-2" size={16}/></button></div>
+                                    <div key={ex.id} className="flex gap-2"><input className="flex-1 p-2 border rounded text-sm" placeholder="Campo" value={ex.label || ''} onChange={e=>handleUpdateExtra(i,'label',e.target.value)} /><input className="flex-1 p-2 border rounded text-sm" placeholder="Valor" value={ex.value || ''} onChange={e=>handleUpdateExtra(i,'value',e.target.value)} />
+                                    <button onClick={()=>handleAddExtra()} className="text-green-500 p-2"><IconWrapper name="plus" size={16}/></button>
+                                    <button onClick={()=>handleRemoveExtra(i)} className="text-red-400 p-2"><IconWrapper name="trash-2" size={16}/></button></div>
                                 ))}
                                 <button onClick={handleAddExtra} className="w-full py-2 bg-blue-50 text-blue-600 font-bold rounded-lg mt-2 flex items-center justify-center gap-2"><IconWrapper name="plus" size={16} /> Adicionar Campo</button>
                             </div>
@@ -580,7 +592,7 @@
                                     ))}
                                 </div>
                             )}
-                            <button onClick={() => handleAddExtraField()} className="w-full py-2 bg-pink-50 text-pink-600 font-bold rounded-lg flex items-center justify-center gap-2"><IconWrapper name="plus" size={16}/> Adicionar Campo Extra</button>
+                            <button onClick={() => handleAddExtraField()} className="w-full py-2 bg-pink-50 text-pink-600 font-bold rounded-lg flex items-center justify-center gap-2 mb-4"><IconWrapper name="plus" size={16}/> Adicionar Campo Extra</button>
                         </div>
                     </div>
 
@@ -643,14 +655,12 @@
                 <div className="p-6 pb-24 min-h-screen bg-gray-50 relative content-wrapper">
                     <div className="flex items-center gap-3 mb-6"><button onClick={() => setScreen('home')} className="p-2 bg-white rounded-lg shadow-sm border border-gray-100 text-gray-600"><IconWrapper name="arrow-left" size={20}/></button><h1 className="text-xl font-bold">Custos Fixos</h1></div>
                     <div className="bg-indigo-600 rounded-2xl p-6 text-white mb-6 shadow-lg"><p className="text-indigo-200 text-sm">Total Mensal</p><h2 className="text-3xl font-bold">R$ {total.toFixed(2)}</h2></div>
-                    <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-                        {costs.map(c => (
-                            <div key={c.id} onClick={() => openEdit(c)} className="p-4 flex justify-between items-center border-b last:border-0 cursor-pointer hover:bg-gray-50">
-                                <span className="font-medium text-gray-700">{c.name}</span>
-                                <div className="flex gap-4 items-center"><span className="font-bold">R$ {(c.value || 0).toFixed(2)}</span><button onClick={(e) => {e.stopPropagation(); onDeleteCost(c.id)}} className="text-gray-300 hover:text-red-500"><IconWrapper name="trash-2" size={18}/></button></div>
-                            </div>
-                        ))}
-                    </div>
+                    <div className="bg-white rounded-xl shadow-sm border overflow-hidden">{costs.map(c => (
+                        <div key={c.id} onClick={() => openEdit(c)} className="p-4 flex justify-between items-center border-b last:border-0 cursor-pointer hover:bg-gray-50">
+                            <span className="font-medium text-gray-700">{c.name}</span>
+                            <div className="flex gap-4 items-center"><span className="font-bold">R$ {(c.value || 0).toFixed(2)}</span><button onClick={(e) => {e.stopPropagation(); onDeleteCost(c.id)}} className="text-gray-300 hover:text-red-500"><IconWrapper name="trash-2" size={18}/></button></div>
+                        </div>
+                    ))}</div>
                     <button onClick={openNew} className="mt-6 w-full py-4 bg-indigo-600 text-white rounded-xl font-bold shadow-lg flex justify-center gap-2"><IconWrapper name="plus" size={20}/> Adicionar Custo</button>
                     {isModalOpen && (
                         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -687,14 +697,12 @@
                 <div className="p-6 pb-24 min-h-screen bg-gray-50 relative content-wrapper">
                     <div className="flex items-center gap-3 mb-6"><button onClick={() => setScreen('home')} className="p-2 bg-white rounded-lg shadow-sm border border-gray-100 text-gray-600"><IconWrapper name="arrow-left" size={20}/></button><h1 className="text-xl font-bold">Custos Variáveis</h1></div>
                     <div className="bg-violet-600 rounded-2xl p-6 text-white mb-6 shadow-lg"><p className="text-violet-200 text-sm">Total Mark-up</p><h2 className="text-3xl font-bold">{total.toFixed(2)}%</h2></div>
-                    <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
-                        {costs.map(c => (
-                            <div key={c.id} onClick={() => openEdit(c)} className="p-4 flex justify-between items-center border-b last:border-0 cursor-pointer hover:bg-gray-50">
-                                <span className="font-medium text-gray-700">{c.name}</span>
-                                <div className="flex gap-4 items-center"><span className="font-bold">{c.percentage.toFixed(2)}%</span><button onClick={(e) => {e.stopPropagation(); onDeleteCost(c.id)}} className="text-gray-300 hover:text-red-500"><IconWrapper name="trash-2" size={18}/></button></div>
-                            </div>
-                        ))}
-                    </div>
+                    <div className="bg-white rounded-xl shadow-sm border overflow-hidden">{costs.map(c => (
+                        <div key={c.id} onClick={() => openEdit(c)} className="p-4 flex justify-between items-center border-b last:border-0 cursor-pointer hover:bg-gray-50">
+                            <span className="font-medium text-gray-700">{c.name}</span>
+                            <div className="flex gap-4 items-center"><span className="font-bold">{c.percentage.toFixed(2)}%</span><button onClick={(e) => {e.stopPropagation(); onDeleteCost(c.id)}} className="text-gray-300 hover:text-red-500"><IconWrapper name="trash-2" size={18}/></button></div>
+                        </div>
+                    ))}</div>
                     <button onClick={openNew} className="mt-6 w-full py-4 bg-violet-600 text-white rounded-xl font-bold shadow-lg flex justify-center gap-2"><IconWrapper name="plus" size={20}/> Adicionar Taxa</button>
                     {isModalOpen && (
                         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -767,6 +775,8 @@
             // Auto-preenchimento da Descrição e Validação
             const handleRefChange = (val) => {
                 const upper = val.toUpperCase();
+                
+                // Valida duplicidade
                 if(upper && (!initialData || initialData.reference !== upper)) {
                      const isDup = products.some(p => p.reference === upper && p.id !== product.id);
                      setRefError(isDup ? "Referência já existe!" : "");
@@ -778,6 +788,8 @@
                     const oldRef = prev.reference;
                     let desc = prev.description;
                     const pOld = `${oldRef} - `; const pNew = `${upper} - `;
+                    
+                    // Atualiza o prefixo da descrição se estiver vazio ou seguir o padrão
                     if(desc === "" || desc.startsWith(pOld)) {
                         desc = pNew + (desc.startsWith(pOld) ? desc.slice(pOld.length) : "");
                     }
@@ -785,6 +797,7 @@
                 });
             };
 
+            // Impede apagar o prefixo da descrição
             const handleDescriptionChange = (e) => {
                 const val = capitalize(e.target.value);
                 const prefix = `${product.reference} - `;
@@ -795,6 +808,7 @@
                 }
             };
             
+            // Move cursor para o final ao focar na descrição
             const handleDescriptionFocus = (e) => {
                 const val = e.target.value;
                 e.target.setSelectionRange(val.length, val.length);
@@ -879,7 +893,7 @@
                 let fabTotal = product.selectedFabrics.reduce((a, b) => a + (b.value || 0), 0);
                 let extraTotal = product.extraServices.reduce((a, b) => a + (b.cost || 0), 0);
                 const rawDirect = fabTotal + (product.sewingCost||0) + (product.printingCost||0) + (product.trimsCost||0) + (product.cuttingCost||0) + extraTotal + (product.clientInputsCost || 0);
-                const totalDirect = rawDirect / 0.97; 
+                const totalDirect = rawDirect / 0.97; // Quebra 3%
                 
                 const group1 = ((product.taxPct||0) + (product.commissionPct||0) + (product.expensesPct||0) + (product.marginPct||0) + (product.freightPct||0))/100;
                 const group2 = ((product.negotiationPct||0) + (product.financialPct||0))/100;
@@ -1103,6 +1117,28 @@
                 { id: 1, name: "Imposto", percentage: 14.00 },
                 { id: 2, name: "Comissão", percentage: 5.00 }
             ]);
+
+            // Add global ESC listener
+            useEffect(() => {
+                const handleEsc = (e) => {
+                    if (e.key === 'Escape') {
+                        if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'SELECT' || document.activeElement.tagName === 'TEXTAREA')) {
+                            // Find all focusable elements
+                            const focusable = Array.from(document.querySelectorAll('input:not([type="hidden"]), select, textarea'));
+                            const index = focusable.indexOf(document.activeElement);
+                            
+                            if (index > 0) {
+                                focusable[index - 1].focus();
+                                e.preventDefault(); // Prevent default ESC behavior if needed
+                            } else {
+                                document.activeElement.blur();
+                            }
+                        }
+                    }
+                };
+                window.addEventListener('keydown', handleEsc);
+                return () => window.removeEventListener('keydown', handleEsc);
+            }, []);
 
             const handleSaveProduct = (product) => {
                 const exists = products.some(p => p.id === product.id);
