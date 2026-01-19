@@ -15,7 +15,7 @@
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     
-    <!-- Lucide Icons -->
+    <!-- Lucide Icons (Biblioteca Gráfica) -->
     <script src="https://unpkg.com/lucide@latest"></script>
 
     <!-- Fonte Inter -->
@@ -95,8 +95,8 @@
     <!-- MÓDULO FIREBASE -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, writeBatch } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
         // CONFIGURAÇÃO DO FIREBASE (LPM CUSTOS)
         const firebaseConfig = {
@@ -113,14 +113,15 @@
             app = initializeApp(firebaseConfig);
             db = getFirestore(app);
             auth = getAuth(app);
-            // Login anónimo para permitir leitura/escrita segura por utilizador
-            signInAnonymously(auth).catch((error) => console.error("Erro auth:", error));
         } catch (e) {
             console.error("Erro Firebase:", e);
         }
 
         // Expor serviços para o React
-        window.AppServices = { db, auth, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, onAuthStateChanged };
+        window.AppServices = { 
+            db, auth, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, onAuthStateChanged,
+            createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, writeBatch
+        };
     </script>
 
     <!-- CÓDIGO DA APLICAÇÃO (REACT) -->
@@ -129,7 +130,7 @@
 
         // --- HOOK DE DADOS (CONECTADO AO FIREBASE) ---
         const useData = (collectionName, defaultValue) => {
-            const [data, setData] = useState(defaultValue);
+            const [data, setData] = useState([]);
             const [loading, setLoading] = useState(true);
 
             useEffect(() => {
@@ -155,9 +156,10 @@
                                     return timeB - timeA;
                                 });
 
-                                if (items.length > 0) setData(items);
-                                else if (defaultValue && defaultValue.length > 0 && items.length === 0) {
-                                    setData(defaultValue);
+                                if (items.length > 0) {
+                                    setData(items);
+                                } else if (defaultValue && defaultValue.length > 0 && (!data || data.length === 0)) {
+                                    setData([]); 
                                 } else {
                                     setData([]);
                                 }
@@ -165,6 +167,7 @@
                             });
                             return () => unsubscribe();
                         } else {
+                            setData([]);
                             setLoading(false);
                         }
                     });
@@ -177,7 +180,6 @@
                 const { auth, db, collection, addDoc } = window.AppServices;
                 if (!auth.currentUser) return;
                 const { id, ...cleanItem } = item; 
-                // Garante timestamp na criação
                 cleanItem.timestamp = Date.now();
                 await addDoc(collection(db, `users/${auth.currentUser.uid}/${collectionName}`), cleanItem);
             };
@@ -187,7 +189,6 @@
                 if (!auth.currentUser || !item.id) return;
                 if (typeof item.id === 'number') { add(item); return; }
                 const { id, ...cleanItem } = item;
-                // Mantém timestamp original se existir, senão cria
                 if (!cleanItem.timestamp) cleanItem.timestamp = Date.now();
                 await updateDoc(doc(db, `users/${auth.currentUser.uid}/${collectionName}`, id), cleanItem);
             };
@@ -202,7 +203,6 @@
             return [data, add, update, remove, loading];
         };
 
-        // --- Helper: LocalStorage Hook (Mantido para navegação local simples) ---
         const useStickyState = (defaultValue, key) => {
             const [value, setValue] = useState(() => {
                 const stickyValue = window.localStorage.getItem(key);
@@ -219,15 +219,39 @@
             return str.toLowerCase().replace(/(?:^|\s|["'([{])+\S/g, match => match.toUpperCase());
         };
 
-        // --- Componentes de Ícones (Lucide) ---
-        const Icon = ({ name, size = 24, color = "currentColor", className="" }) => {
-            if (!window.lucide) return null;
-            return <i data-lucide={name} className={className} style={{ width: size, height: size, color: color, display: 'inline-block' }}></i>;
-        };
+        // --- CORREÇÃO DO ICON WRAPPER (IMPEDE ERROS DE REACT DOM) ---
+        // Helper para converter kebab-case (arrow-left) para PascalCase (ArrowLeft)
+        const toPascalCase = (str) => str.replace(/(^\w|-\w)/g, (c) => c.replace('-','').toUpperCase());
 
-        const IconWrapper = (props) => {
-            useEffect(() => { if (window.lucide) window.lucide.createIcons(); });
-            return <i data-lucide={props.name} className={props.className} style={{ width: props.size, height: props.size, color: props.color }}></i>
+        const IconWrapper = ({ name, size = 24, color = "currentColor", className = "" }) => {
+            const ref = useRef(null);
+
+            useEffect(() => {
+                // Verifica se Lucide está carregado e se a referência do elemento existe
+                if (window.lucide && window.lucide.icons && ref.current) {
+                    const iconKey = toPascalCase(name);
+                    const iconDef = window.lucide.icons[iconKey]; // Pega a definição do ícone
+
+                    if (iconDef) {
+                        // Cria o elemento SVG usando a API do Lucide
+                        const svg = window.lucide.createElement(iconDef);
+                        
+                        // Aplica atributos personalizados
+                        svg.setAttribute('width', size);
+                        svg.setAttribute('height', size);
+                        svg.setAttribute('stroke', color);
+                        if(className) svg.setAttribute('class', className);
+
+                        // Limpa o container e insere o novo SVG
+                        // Isso é seguro porque o React controla o <span>, mas não seus filhos neste caso
+                        ref.current.innerHTML = '';
+                        ref.current.appendChild(svg);
+                    }
+                }
+            }, [name, size, color, className]);
+
+            // Renderiza um container vazio que será preenchido pelo useEffect
+            return <span ref={ref} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: size, height: size }}></span>;
         }
         
         const CurrencyInput = ({ value, onChange, placeholder, className, readOnly = false, name }) => {
@@ -324,18 +348,111 @@
             );
         };
 
+        // --- AUTH SCREEN ---
+        const AuthScreen = ({ onLogin }) => {
+            const [isLogin, setIsLogin] = useState(true);
+            const [email, setEmail] = useState("");
+            const [password, setPassword] = useState("");
+            const [error, setError] = useState("");
+            const [loading, setLoading] = useState(false);
+
+            const handleAuth = async (e) => {
+                e.preventDefault();
+                setError("");
+                setLoading(true);
+                const { auth, signInWithEmailAndPassword, createUserWithEmailAndPassword } = window.AppServices;
+
+                try {
+                    if (isLogin) {
+                        await signInWithEmailAndPassword(auth, email, password);
+                    } else {
+                        await createUserWithEmailAndPassword(auth, email, password);
+                    }
+                    // O onAuthStateChanged no App irá disparar e mudar a tela
+                } catch (err) {
+                    console.error("Erro auth capturado:", err);
+                    let msg = "Erro ao autenticar.";
+                    if (err.code === 'auth/invalid-credential') msg = "E-mail ou senha inválidos.";
+                    if (err.code === 'auth/email-already-in-use') msg = "Este e-mail já está cadastrado. Tente fazer Login.";
+                    if (err.code === 'auth/weak-password') msg = "A senha deve ter pelo menos 6 caracteres.";
+                    setError(msg);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
+                    <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md animate-fade-in">
+                        <div className="text-center mb-8">
+                            <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-100 rounded-full text-blue-600 mb-4">
+                                <IconWrapper name="lock" size={32} />
+                            </div>
+                            <h1 className="text-2xl font-bold text-gray-800">LPM Custos</h1>
+                            <p className="text-gray-500">Acesse seus custos de qualquer lugar</p>
+                        </div>
+
+                        {error && <div className="bg-red-50 text-red-500 p-3 rounded-lg text-sm mb-4 text-center border border-red-100">{error}</div>}
+
+                        <form onSubmit={handleAuth} className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">E-mail</label>
+                                <input 
+                                    type="email" 
+                                    required 
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
+                                    className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                                    placeholder="seu@email.com"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Senha</label>
+                                <input 
+                                    type="password" 
+                                    required 
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    className="w-full p-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                                    placeholder="••••••••"
+                                />
+                            </div>
+                            <button 
+                                type="submit" 
+                                disabled={loading}
+                                className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-lg transition-all active:scale-95 disabled:opacity-70 flex justify-center items-center"
+                            >
+                                {loading ? <IconWrapper name="loader-2" size={24} className="animate-spin" /> : (isLogin ? "Entrar" : "Criar Conta")}
+                            </button>
+                        </form>
+
+                        <div className="mt-6 text-center">
+                            <button 
+                                onClick={() => { setIsLogin(!isLogin); setError(""); }}
+                                className="text-blue-600 font-medium text-sm hover:underline"
+                            >
+                                {isLogin ? "Não tem uma conta? Crie agora" : "Já tem conta? Fazer Login"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
         // --- SCREENS ---
-        const HomeScreen = ({ setScreen, products }) => {
-            // Produtos já vêm ordenados pelo useData (do mais recente para o mais antigo)
+        const HomeScreen = ({ setScreen, products, onLogout, userEmail }) => {
             const lastProduct = products && products.length > 0 ? products[0] : null;
 
             return (
                 <div className="p-6 pb-24 animate-fade-in content-wrapper">
                     <header className="flex justify-between items-center mb-6">
-                        <div><h1 className="text-2xl font-bold text-slate-800">Confecção Cost</h1><p className="text-gray-500 text-sm">Controle sua produção</p></div>
+                        <div>
+                            <h1 className="text-2xl font-bold text-slate-800">Confecção Cost</h1>
+                            <p className="text-gray-500 text-xs truncate max-w-[200px]">{userEmail}</p>
+                        </div>
                         <div className="flex gap-2">
                              <button onClick={() => setScreen('settings')} className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-slate-600 shadow-sm hover:bg-gray-50 border border-gray-200"><IconWrapper name="settings" size={20} /></button>
-                             <div className="w-10 h-10 bg-slate-800 rounded-full flex items-center justify-center text-white font-bold shadow-sm">C</div>
+                             <button onClick={onLogout} className="w-10 h-10 bg-slate-800 rounded-full flex items-center justify-center text-white font-bold shadow-sm hover:bg-slate-700"><IconWrapper name="log-out" size={18} /></button>
                         </div>
                     </header>
                     <SummaryCard lastProduct={lastProduct} />
@@ -1027,16 +1144,17 @@
             );
         };
 
-        const SettingsScreen = ({ setScreen }) => {
+        const SettingsScreen = ({ setScreen, clients, fabrics, fixedCosts, variableCosts, products }) => {
             const inputFileRef = useRef(null);
+            const [importing, setImporting] = useState(false);
             
             const handleExport = () => {
                 const data = {
-                    app_clients: localStorage.getItem('app_clients'),
-                    app_fabrics: localStorage.getItem('app_fabrics'),
-                    app_fixedCosts: localStorage.getItem('app_fixedCosts'),
-                    app_variableCosts: localStorage.getItem('app_variableCosts'),
-                    app_products: localStorage.getItem('app_products'),
+                    app_clients: clients,
+                    app_fabrics: fabrics,
+                    app_fixedCosts: fixedCosts,
+                    app_variableCosts: variableCosts,
+                    app_products: products,
                 };
                 const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
                 const url = URL.createObjectURL(blob);
@@ -1046,22 +1164,69 @@
                 a.click();
             };
 
-            const handleImport = (event) => {
+            const handleImport = async (event) => {
                 const file = event.target.files[0];
                 if (!file) return;
+
+                const { auth, db, collection, addDoc } = window.AppServices;
+                if (!auth.currentUser) {
+                    alert("Você precisa estar logado para importar dados para sua conta.");
+                    return;
+                }
+
+                if(!confirm("Isso irá importar os dados do backup para sua conta online atual. Deseja continuar?")) return;
+
+                setImporting(true);
                 const reader = new FileReader();
-                reader.onload = (e) => {
+                reader.onload = async (e) => {
                     try {
                         const data = JSON.parse(e.target.result);
-                        if (data.app_clients) localStorage.setItem('app_clients', data.app_clients);
-                        if (data.app_fabrics) localStorage.setItem('app_fabrics', data.app_fabrics);
-                        if (data.app_fixedCosts) localStorage.setItem('app_fixedCosts', data.app_fixedCosts);
-                        if (data.app_variableCosts) localStorage.setItem('app_variableCosts', data.app_variableCosts);
-                        if (data.app_products) localStorage.setItem('app_products', data.app_products);
-                        alert('Backup restaurado com sucesso! A página será recarregada.');
+                        
+                        // Função auxiliar para importar array para collection
+                        const uploadCollection = async (jsonKey, firestoreCollName) => {
+                            let rawData = data[jsonKey];
+                            // Se não existir, tenta procurar sem o prefixo "app_" (caso backup antigo)
+                            if (!rawData) rawData = data[jsonKey.replace('app_', '')];
+                            
+                            if (rawData) {
+                                let items = [];
+                                try {
+                                    // Tenta fazer parse se for string (formato localStorage antigo), senão usa o dado direto
+                                    if (typeof rawData === 'string') {
+                                        items = JSON.parse(rawData);
+                                    } else {
+                                        items = rawData;
+                                    }
+                                } catch (err) {
+                                    console.warn(`Aviso: Falha ao interpretar ${jsonKey}, tentando usar dado bruto.`);
+                                    items = rawData;
+                                }
+
+                                if (Array.isArray(items) && items.length > 0) {
+                                    const promises = items.map(item => {
+                                        const { id, ...cleanItem } = item;
+                                        cleanItem.timestamp = Date.now();
+                                        return addDoc(collection(db, `users/${auth.currentUser.uid}/${firestoreCollName}`), cleanItem);
+                                    });
+                                    await Promise.all(promises);
+                                }
+                            }
+                        };
+
+                        await uploadCollection('app_clients', 'clients');
+                        await uploadCollection('app_fabrics', 'fabrics');
+                        await uploadCollection('app_fixedCosts', 'fixedCosts');
+                        await uploadCollection('app_variableCosts', 'variableCosts');
+                        await uploadCollection('app_products', 'products');
+
+                        alert('Dados importados com sucesso para a nuvem!');
+                        // Limpa o input para permitir re-seleção do mesmo arquivo se necessário
+                        if(inputFileRef.current) inputFileRef.current.value = "";
                         window.location.reload();
                     } catch (err) {
-                        alert('Erro ao ler arquivo de backup.');
+                        alert('Erro ao processar arquivo de backup: ' + err.message);
+                    } finally {
+                        setImporting(false);
                     }
                 };
                 reader.readAsText(file);
@@ -1073,19 +1238,20 @@
                     
                     <div className="bg-white p-6 rounded-2xl shadow-sm border space-y-6">
                         <div>
-                            <h3 className="font-bold text-gray-800 mb-2">Exportar Dados</h3>
-                            <p className="text-sm text-gray-500 mb-3">Salve todos os seus cadastros e produtos em um arquivo seguro no seu computador.</p>
+                            <h3 className="font-bold text-gray-800 mb-2">Exportar Dados (Backup)</h3>
+                            <p className="text-sm text-gray-500 mb-3">Baixe uma cópia dos seus dados que estão na nuvem para o seu dispositivo.</p>
                             <button onClick={handleExport} className="w-full py-3 bg-blue-50 text-blue-600 font-bold rounded-lg border border-blue-100 flex items-center justify-center gap-2 hover:bg-blue-100 transition-colors">
-                                <IconWrapper name="download" size={20} /> Fazer Backup
+                                <IconWrapper name="download" size={20} /> Baixar Backup
                             </button>
                         </div>
                         
                         <div className="pt-6 border-t border-gray-100">
                             <h3 className="font-bold text-gray-800 mb-2">Restaurar Backup</h3>
-                            <p className="text-sm text-gray-500 mb-3">Carregue um arquivo de backup anterior para recuperar seus dados.</p>
+                            <p className="text-sm text-gray-500 mb-3">Carregue um arquivo de backup (.json) para enviar seus dados para a sua conta online.</p>
                             <input type="file" ref={inputFileRef} onChange={handleImport} style={{display:'none'}} accept=".json"/>
-                            <button onClick={() => inputFileRef.current.click()} className="w-full py-3 bg-gray-50 text-gray-600 font-bold rounded-lg border border-gray-200 flex items-center justify-center gap-2 hover:bg-gray-100 transition-colors">
-                                <IconWrapper name="upload" size={20} /> Carregar Arquivo
+                            <button disabled={importing} onClick={() => inputFileRef.current.click()} className="w-full py-3 bg-gray-50 text-gray-600 font-bold rounded-lg border border-gray-200 flex items-center justify-center gap-2 hover:bg-gray-100 transition-colors">
+                                {importing ? <IconWrapper name="loader-2" size={20} className="animate-spin" /> : <IconWrapper name="upload" size={20} />}
+                                {importing ? "Importando..." : "Carregar para Nuvem"}
                             </button>
                         </div>
                     </div>
@@ -1095,41 +1261,49 @@
 
         const App = () => {
             const [currentScreen, setCurrentScreen] = useStickyState('home', 'app_screen');
+            const [user, setUser] = useState(null);
+            const [authLoading, setAuthLoading] = useState(true);
+
+            // Listener de Auth Global
+            useEffect(() => {
+                const checkServices = setInterval(() => {
+                    if (window.AppServices && window.AppServices.auth) {
+                        clearInterval(checkServices);
+                        const { auth, onAuthStateChanged } = window.AppServices;
+                        onAuthStateChanged(auth, (u) => {
+                            setUser(u);
+                            setAuthLoading(false);
+                        });
+                    }
+                }, 100);
+                return () => clearInterval(checkServices);
+            }, []);
+
             const [products, addProduct, updateProduct, deleteProduct] = useData('products', []);
             const [editingProduct, setEditingProduct] = useState(null); 
             
-            // Dados Persistentes
             const [clients, addClient, updateClient, deleteClient] = useData('clients', [
-                { id: 1, name: "Torra Torra", commission: 5.0, tax: 14.0, margin: 15.0, freight: 3.0, expenses: 0.0, financial: 0.0, negotiation: 0.0, inputs: [], extraFields: [] },
-                { id: 2, name: "Riachuelo", commission: 6.0, tax: 14.0, margin: 18.0, freight: 2.5, expenses: 0.0, financial: 0.0, negotiation: 0.0, inputs: [], extraFields: [] }
+                // Defaults visuais (só aparecem se não houver dados na conta)
+                { id: 1, name: "Exemplo Cliente", commission: 0, tax: 0, margin: 0, freight: 0, expenses: 0, financial: 0, negotiation: 0, inputs: [], extraFields: [] }
             ]);
             
             const [fabrics, addFabric, updateFabric, deleteFabric] = useData('fabrics', [
-                { id: 1, name: "Suplex - 92%PES 8%PEU", price: 20.00, type: "Kg", yield: 3.5, yarns: [], extraFields: [], weavingCost: 0, weavingBreakage: 0, dyeingCost: 0, dyeingBreakage: 0, colorCost1: 0, colorCost2: 0, colorCost3: 0 }
+                { id: 1, name: "Tecido Exemplo", price: 0.00, type: "Kg", yield: 0, yarns: [], extraFields: [], weavingCost: 0, weavingBreakage: 0, dyeingCost: 0, dyeingBreakage: 0, colorCost1: 0, colorCost2: 0, colorCost3: 0 }
             ]);
 
-            const [fixedCosts, addFixedCost, updateFixedCost, deleteFixedCost] = useData('fixedCosts', [
-                { id: 1, name: "Aluguel", value: 2500.00 },
-                { id: 2, name: "Energia", value: 850.00 }
-            ]);
-
-            const [variableCosts, addVariableCost, updateVariableCost, deleteVariableCost] = useData('variableCosts', [
-                { id: 1, name: "Imposto", percentage: 14.00 },
-                { id: 2, name: "Comissão", percentage: 5.00 }
-            ]);
+            const [fixedCosts, addFixedCost, updateFixedCost, deleteFixedCost] = useData('fixedCosts', []);
+            const [variableCosts, addVariableCost, updateVariableCost, deleteVariableCost] = useData('variableCosts', []);
 
             // Add global ESC listener
             useEffect(() => {
                 const handleEsc = (e) => {
                     if (e.key === 'Escape') {
                         if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'SELECT' || document.activeElement.tagName === 'TEXTAREA')) {
-                            // Find all focusable elements
                             const focusable = Array.from(document.querySelectorAll('input:not([type="hidden"]), select, textarea'));
                             const index = focusable.indexOf(document.activeElement);
-                            
                             if (index > 0) {
                                 focusable[index - 1].focus();
-                                e.preventDefault(); // Prevent default ESC behavior if needed
+                                e.preventDefault(); 
                             } else {
                                 document.activeElement.blur();
                             }
@@ -1147,22 +1321,30 @@
                 setEditingProduct(null);
             };
 
+            const handleLogout = () => {
+                const { auth, signOut } = window.AppServices;
+                signOut(auth);
+            };
+
             const handleEditProduct = (p) => { setEditingProduct(p); setCurrentScreen('calculator'); };
             const handleDuplicateProduct = (p) => { const { id, ...data } = p; setEditingProduct({ ...data, id: null, reference: "", description: p.description + " (Cópia)" }); setCurrentScreen('calculator'); };
 
             const renderScreen = () => {
                 switch(currentScreen) {
-                    case 'home': return <HomeScreen setScreen={setCurrentScreen} products={products} />;
+                    case 'home': return <HomeScreen setScreen={setCurrentScreen} products={products} onLogout={handleLogout} userEmail={user?.email} />;
                     case 'calculator': return <CalculatorScreen setScreen={setCurrentScreen} clients={clients} fabrics={fabrics} fixedCosts={fixedCosts} variableCosts={variableCosts} onSaveProduct={handleSaveProduct} initialData={editingProduct} products={products} />;
                     case 'clients': return <ClientsScreen setScreen={setCurrentScreen} clients={clients} onAddClient={addClient} onDeleteClient={deleteClient} onUpdateClient={updateClient} />;
                     case 'fabrics': return <FabricsScreen setScreen={setCurrentScreen} fabrics={fabrics} onAddFabric={addFabric} onDeleteFabric={deleteFabric} onUpdateFabric={updateFabric} />;
                     case 'fixedCosts': return <FixedCostsScreen setScreen={setCurrentScreen} costs={fixedCosts} onAddCost={addFixedCost} onUpdateCost={updateFixedCost} onDeleteCost={deleteFixedCost} />;
                     case 'variableCosts': return <VariableCostsScreen setScreen={setCurrentScreen} costs={variableCosts} onAddCost={addVariableCost} onUpdateCost={updateVariableCost} onDeleteCost={deleteVariableCost} />;
                     case 'search': return <SearchScreen setScreen={setCurrentScreen} products={products} clients={clients} onDeleteProduct={deleteProduct} onEditProduct={handleEditProduct} onDuplicateProduct={handleDuplicateProduct} />;
-                    case 'settings': return <SettingsScreen setScreen={setCurrentScreen} />;
+                    case 'settings': return <SettingsScreen setScreen={setCurrentScreen} clients={clients} fabrics={fabrics} fixedCosts={fixedCosts} variableCosts={variableCosts} products={products} />;
                     default: return <HomeScreen setScreen={setCurrentScreen} products={products} />;
                 }
             };
+
+            if (authLoading) return <div className="h-screen w-full flex items-center justify-center bg-gray-100 text-gray-500">Carregando...</div>;
+            if (!user) return <AuthScreen />;
 
             return (
                 <div className="app-container">
