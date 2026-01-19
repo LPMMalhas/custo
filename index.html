@@ -128,7 +128,7 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        // --- HOOK DE DADOS (CONECTADO AO FIREBASE) ---
+        // --- HOOK DE DADOS (COMPARTILHADO + LOGS) ---
         const useData = (collectionName, defaultValue) => {
             const [data, setData] = useState([]);
             const [loading, setLoading] = useState(true);
@@ -143,13 +143,16 @@
 
                 const initListener = () => {
                     const { auth, db, collection, onSnapshot, query, onAuthStateChanged } = window.AppServices;
+                    
+                    // Listener de Auth apenas para garantir acesso, mas a query é COMPARTILHADA
                     onAuthStateChanged(auth, (user) => {
                         if (user) {
-                            const q = query(collection(db, `users/${user.uid}/${collectionName}`));
+                            // CAMINHO DO BANCO AGORA É 'shared_data' (Comum a todos)
+                            const q = query(collection(db, `shared_data/${collectionName}/items`));
                             const unsubscribe = onSnapshot(q, (snapshot) => {
                                 const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                                 
-                                // ORDENAÇÃO: Garante que os itens mais recentes (maior timestamp) venham primeiro
+                                // ORDENAÇÃO
                                 items.sort((a, b) => {
                                     const timeA = a.timestamp || (typeof a.id === 'number' ? a.id : 0);
                                     const timeB = b.timestamp || (typeof b.id === 'number' ? b.id : 0);
@@ -175,29 +178,69 @@
                 return () => clearInterval(checkServices);
             }, [collectionName]);
 
-            // Funções CRUD Firebase
+            // --- SISTEMA DE LOGS ---
+            const createLog = async (action, details) => {
+                const { auth, db, collection, addDoc } = window.AppServices;
+                if (!auth.currentUser) return;
+                try {
+                    await addDoc(collection(db, "system_logs"), {
+                        action: action, // 'create', 'update', 'delete'
+                        collection: collectionName,
+                        details: details, // ID do item ou nome
+                        userEmail: auth.currentUser.email, // Quem fez
+                        userId: auth.currentUser.uid,
+                        timestamp: Date.now(),
+                        dateString: new Date().toLocaleString('pt-BR')
+                    });
+                } catch (e) {
+                    console.error("Erro ao gravar log:", e);
+                }
+            };
+
+            // Funções CRUD Firebase (Comum)
             const add = async (item) => {
                 const { auth, db, collection, addDoc } = window.AppServices;
                 if (!auth.currentUser) return;
+                
                 const { id, ...cleanItem } = item; 
                 cleanItem.timestamp = Date.now();
-                await addDoc(collection(db, `users/${auth.currentUser.uid}/${collectionName}`), cleanItem);
+                
+                // RASTREABILIDADE NO ITEM
+                cleanItem.createdBy = auth.currentUser.email;
+                cleanItem.lastModifiedBy = auth.currentUser.email;
+                
+                const docRef = await addDoc(collection(db, `shared_data/${collectionName}/items`), cleanItem);
+                
+                // GERA LOG
+                createLog('create', { docId: docRef.id, name: cleanItem.name || cleanItem.reference || 'Item' });
             };
 
             const update = async (item) => {
                 const { auth, db, doc, updateDoc } = window.AppServices;
                 if (!auth.currentUser || !item.id) return;
-                if (typeof item.id === 'number') { add(item); return; }
+                if (typeof item.id === 'number') { add(item); return; } // Legado
+                
                 const { id, ...cleanItem } = item;
-                if (!cleanItem.timestamp) cleanItem.timestamp = Date.now();
-                await updateDoc(doc(db, `users/${auth.currentUser.uid}/${collectionName}`, id), cleanItem);
+                
+                // RASTREABILIDADE NO ITEM
+                cleanItem.lastModifiedTimestamp = Date.now();
+                cleanItem.lastModifiedBy = auth.currentUser.email;
+
+                await updateDoc(doc(db, `shared_data/${collectionName}/items`, id), cleanItem);
+                
+                // GERA LOG
+                createLog('update', { docId: id, name: cleanItem.name || cleanItem.reference || 'Item' });
             };
 
             const remove = async (id) => {
                 const { auth, db, doc, deleteDoc } = window.AppServices;
                 if (!auth.currentUser || !id) return;
                 if (typeof id === 'number') { setData(prev => prev.filter(i => i.id !== id)); return; }
-                await deleteDoc(doc(db, `users/${auth.currentUser.uid}/${collectionName}`, id));
+                
+                await deleteDoc(doc(db, `shared_data/${collectionName}/items`, id));
+                
+                // GERA LOG
+                createLog('delete', { docId: id });
             };
 
             return [data, add, update, remove, loading];
@@ -862,6 +905,7 @@
                                     <div className="flex items-center gap-2 mb-1"><span className="font-bold text-gray-800">{prod.reference}</span><span className="text-gray-400">•</span><span className="text-gray-600 text-sm">{prod.description}</span></div>
                                     <div className="text-xs text-gray-500 mb-2">{getClientName(prod.clientId)} • {prod.date}</div>
                                     <div className="inline-flex items-center gap-2 bg-green-50 px-2 py-1 rounded text-green-700 font-bold text-sm border border-green-100">R$ {(prod.suggestedPrice || 0).toFixed(2)}</div>
+                                    {prod.lastModifiedBy && <div className="text-[10px] text-gray-400 mt-1 italic">Editado por: {prod.lastModifiedBy}</div>}
                                 </div>
                                 <div className="flex justify-end gap-2 border-t pt-3">
                                     <button onClick={(e) => {e.stopPropagation(); onEditProduct(prod)}} className="p-2 text-blue-500 hover:bg-blue-50 rounded"><IconWrapper name="edit" size={18}/></button>
@@ -1174,7 +1218,7 @@
                     return;
                 }
 
-                if(!confirm("Isso irá importar os dados do backup para sua conta online atual. Deseja continuar?")) return;
+                if(!confirm("Isso irá importar os dados do backup para a CONTA COMPARTILHADA. Todos os usuários verão esses dados. Deseja continuar?")) return;
 
                 setImporting(true);
                 const reader = new FileReader();
@@ -1182,7 +1226,7 @@
                     try {
                         const data = JSON.parse(e.target.result);
                         
-                        // Função auxiliar para importar array para collection
+                        // Função auxiliar para importar array para collection COMPARTILHADA
                         const uploadCollection = async (jsonKey, firestoreCollName) => {
                             let rawData = data[jsonKey];
                             // Se não existir, tenta procurar sem o prefixo "app_" (caso backup antigo)
@@ -1206,7 +1250,9 @@
                                     const promises = items.map(item => {
                                         const { id, ...cleanItem } = item;
                                         cleanItem.timestamp = Date.now();
-                                        return addDoc(collection(db, `users/${auth.currentUser.uid}/${firestoreCollName}`), cleanItem);
+                                        cleanItem.createdBy = auth.currentUser.email + " (Importação)";
+                                        // IMPORTA PARA CAMINHO COMPARTILHADO
+                                        return addDoc(collection(db, `shared_data/${firestoreCollName}/items`), cleanItem);
                                     });
                                     await Promise.all(promises);
                                 }
@@ -1219,7 +1265,7 @@
                         await uploadCollection('app_variableCosts', 'variableCosts');
                         await uploadCollection('app_products', 'products');
 
-                        alert('Dados importados com sucesso para a nuvem!');
+                        alert('Dados importados com sucesso para a nuvem compartilhada!');
                         // Limpa o input para permitir re-seleção do mesmo arquivo se necessário
                         if(inputFileRef.current) inputFileRef.current.value = "";
                         window.location.reload();
