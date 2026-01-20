@@ -209,7 +209,10 @@
                 cleanItem.createdBy = auth.currentUser.email;
                 cleanItem.lastModifiedBy = auth.currentUser.email;
                 
-                const docRef = await addDoc(collection(db, `shared_data/${collectionName}/items`), cleanItem);
+                // SANITIZAÇÃO: Remove undefined e converte para null (fix erro firebase)
+                const sanitizedItem = JSON.parse(JSON.stringify(cleanItem, (k, v) => v === undefined ? null : v));
+
+                const docRef = await addDoc(collection(db, `shared_data/${collectionName}/items`), sanitizedItem);
                 
                 // GERA LOG
                 createLog('create', { docId: docRef.id, name: cleanItem.name || cleanItem.reference || 'Item' });
@@ -226,7 +229,10 @@
                 cleanItem.lastModifiedTimestamp = Date.now();
                 cleanItem.lastModifiedBy = auth.currentUser.email;
 
-                await updateDoc(doc(db, `shared_data/${collectionName}/items`, id), cleanItem);
+                // SANITIZAÇÃO
+                const sanitizedItem = JSON.parse(JSON.stringify(cleanItem, (k, v) => v === undefined ? null : v));
+
+                await updateDoc(doc(db, `shared_data/${collectionName}/items`, id), sanitizedItem);
                 
                 // GERA LOG
                 createLog('update', { docId: id, name: cleanItem.name || cleanItem.reference || 'Item' });
@@ -981,7 +987,17 @@
                 if(cid) {
                     const c = clients.find(cli => cli.id === cid);
                     if(c) {
-                        updates = { ...updates, taxPct: c.tax, commissionPct: c.commission, marginPct: c.margin, freightPct: c.freight, expensesPct: c.expenses, financialPct: c.financial, negotiationPct: c.negotiation, clientInputsCost: c.inputs ? c.inputs.reduce((a,b)=>a+(b.cost||0),0) : 0 };
+                        updates = { 
+                            ...updates, 
+                            taxPct: c.tax || 0, 
+                            commissionPct: c.commission || 0, 
+                            marginPct: c.margin || 0, 
+                            freightPct: c.freight || 0, 
+                            expensesPct: c.expenses || 0, 
+                            financialPct: c.financial || 0, 
+                            negotiationPct: c.negotiation || 0, 
+                            clientInputsCost: c.inputs ? c.inputs.reduce((a,b)=>a+(b.cost||0),0) : 0 
+                        };
                     }
                 }
                 setProduct(prev => ({ ...prev, ...updates }));
